@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bfb-dist"
+version = "0.0.1"
+description = "A modular framework for BFB genomic cycle simulations and distance analysis"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = []
+
+[project.scripts]
+bfbtool = "bfb_dist.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
