@@ -2,6 +2,9 @@ import random
 from bfb_dist.utils import CHROMOSOME_LENGTHS, format_red, format_green, format_purple
 from bfb_dist.sequence import Segment, Sequence
 
+def _set_seed(seed):
+    random.seed(seed)
+
 def simulate_reference_sequence(n_segments, min_segment_len=1000, max_segment_len=5000, starting_position=None):
     chromosome = random.choice(list(CHROMOSOME_LENGTHS.keys()))
     if starting_position is None:
@@ -19,7 +22,7 @@ def simulate_reference_sequence(n_segments, min_segment_len=1000, max_segment_le
 def simulate_bfb(reference, num_cycles, verbose=True):
     template = reference
     ops = [reference]
-    for _ in range(num_cycles):
+    for n_cycle in range(num_cycles):
         l = len(template)
         x = random.randint(0, l - 1) if l > 1 else 0
         y = random.randint(x + 1, l) if l > 0 else l
@@ -32,7 +35,7 @@ def simulate_bfb(reference, num_cycles, verbose=True):
         ops.append(template)
         
         if verbose:
-            print(f"{format_red(p)};{format_green(q)};{format_purple(r)}")
+            print('R: ' if n_cycle == 0 else '-> ', ';'.join(s for s in [format_red(p), format_green(q), format_purple(r)] if len(s) > 16))
     if verbose:
-        print(template)
+        print('-> ', template)
     return reference, template, ops

@@ -60,7 +60,7 @@ class Sequence:
         return self.segments == superseq.segments[:len(self.segments)]
 
     def previous_bfb(self):
-        pot_sources = set()
+        pot_sources = {}
         l = len(self.segments)
         for i in range((l + 1) // 2, l):
             rc_target = self[i:].reverse_complement()
@@ -68,8 +68,8 @@ class Sequence:
             for x in range(0, 2 * i - l + 1):
                 y = x + target_len
                 if self[x:y] == rc_target:
-                    pot_sources.add(self[:i])
-                    pot_sources.add(self[:y] + self[y:i].reverse_complement())
+                    pot_sources[self[:i]] = (self[:x], self[x:y], self[y:i])
+                    pot_sources[self[:y] + self[y:i].reverse_complement()] = (self[:x], self[x:y], self[y:i].reverse_complement())
         return pot_sources
 
     @classmethod
