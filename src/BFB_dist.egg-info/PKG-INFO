@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: BFB-dist
-Version: 0.0.1
-Summary: A framework for BFB cycle simulation and inference
-Requires-Python: >=3.7
-Description-Content-Type: text/markdown
-License-File: LICENSE
-Dynamic: license-file
