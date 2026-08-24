@@ -85,6 +85,18 @@ Then run:
 bfb-dist distance --input sequences.txt --out result --colored
 ```
 
+By default this computes the general, unrestricted BFB distance. Pass
+`--mode` to restrict the search to a more biologically-focused variant:
+
+- `--mode bfb` (default): every p/i/f-BFB history reaching the target.
+- `--mode nbfb`: only *nested* histories, where every forward-part deletion
+  stays within the material the immediately preceding cycle created.
+- `--mode nbfb-star`: only *strongly nested* histories, a polynomial-time
+  restriction of `nbfb` to histories whose intermediate sequences are always
+  foldable back onto the target. `nbfb-star` distance is always at least the
+  `nbfb` distance, and can be unreachable (infinite) even when `nbfb` and
+  `bfb` are both finite.
+
 The command creates:
 
 - `result.graph`: the BFB graph in its text adjacency-list format.
@@ -103,10 +115,13 @@ uncolored path file.
 
 ## Python API
 
-`BFB_dist` and `BFBGraph` are available directly from the package:
+`BFB_dist`, `NBFB_dist`, `NBFB_star_dist`, and `BFBGraph` are available
+directly from the package. `NBFB_dist` and `NBFB_star_dist` share `BFB_dist`'s
+signature and return the same `BFBGraph` type, restricted to nested and
+strongly nested histories respectively:
 
 ```python
-from bfb_dist import BFB_dist, BFBGraph
+from bfb_dist import BFB_dist, BFBGraph, NBFB_dist, NBFB_star_dist
 from bfb_dist.sequence import Sequence
 
 source = Sequence.from_string(
@@ -116,6 +131,12 @@ target = source.bfb_target(0, 1, False)
 
 graph = BFB_dist(source, target)
 print(graph.calculate_bfb_distance())
+
+nested_graph = NBFB_dist(source, target)
+print(nested_graph.calculate_bfb_distance())
+
+strongly_nested_graph = NBFB_star_dist(source, target)
+print(strongly_nested_graph.calculate_bfb_distance())
 
 with open("result.graph", "w", encoding="utf-8") as output:
     graph.write_text(output)

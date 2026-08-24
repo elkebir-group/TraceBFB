@@ -64,6 +64,77 @@ class SequenceTests(unittest.TestCase):
 
         self.assertIn((source, 1, 2, True), target.previous_bfb())
 
+    def test_successors_produces_forward_and_non_forward_children(self):
+        source = letters("ABC")
+
+        successors = source.successors()
+
+        self.assertIn(
+            (source.bfb_target(1, 2, False), 1, 2, False),
+            successors,
+        )
+        self.assertIn(
+            (source.bfb_target(1, 2, True), 1, 2, True),
+            successors,
+        )
+
+    def test_successors_omits_forward_deletion_when_r_is_empty(self):
+        source = letters("ABC")
+
+        successors = source.successors()
+
+        self.assertNotIn(
+            (source.bfb_target(0, 3, True), 0, 3, True),
+            successors,
+        )
+        self.assertIn(
+            (source.bfb_target(0, 3, False), 0, 3, False),
+            successors,
+        )
+
+    def test_successors_and_previous_bfb_are_inverse(self):
+        source = letters("ABC")
+
+        for child, x, y, is_forward_deletion in source.successors():
+            self.assertIn(
+                (source, x, y, is_forward_deletion),
+                child.previous_bfb(),
+            )
+
+    def test_lcp_length(self):
+        self.assertEqual(
+            letters("ABC").lcp_length(letters("ABD")),
+            2,
+        )
+        self.assertEqual(
+            letters("ABC").lcp_length(letters("ABC")),
+            3,
+        )
+        self.assertEqual(
+            letters("ABC").lcp_length(letters("")),
+            0,
+        )
+
+    def test_is_infix_of(self):
+        self.assertTrue(letters("BC").is_infix_of(letters("ABCD")))
+        self.assertTrue(letters("").is_infix_of(letters("ABCD")))
+        self.assertFalse(letters("CB").is_infix_of(letters("ABCD")))
+        self.assertFalse(letters("BC").is_infix_of(letters("AB")))
+
+    def test_is_infix_of_boundary_matches(self):
+        # Match at the very start and the very end of the haystack.
+        self.assertTrue(letters("AB").is_infix_of(letters("ABCD")))
+        self.assertTrue(letters("CD").is_infix_of(letters("ABCD")))
+        self.assertTrue(letters("ABCD").is_infix_of(letters("ABCD")))
+        self.assertFalse(letters("ABCDE").is_infix_of(letters("ABCD")))
+
+    def test_is_infix_of_overlapping_repeats(self):
+        # Classic Z-algorithm stress cases: repeated/overlapping patterns.
+        self.assertTrue(letters("AA").is_infix_of(letters("AAAA")))
+        self.assertTrue(letters("ABAB").is_infix_of(letters("ABABAB")))
+        self.assertFalse(letters("AAB").is_infix_of(letters("AAAA")))
+        self.assertTrue(letters("AAB").is_infix_of(letters("AAAAB")))
+
     def test_genomic_string_round_trip(self):
         sequence = genomic_sequence(3)
 

@@ -9,6 +9,31 @@ _SEGMENT_PATTERN = re.compile(
     r"\[(?P<strand>[RC])\]"
 )
 
+_SENTINEL = object()
+
+
+def _z_function(elements):
+    """Return the Z-array of ``elements`` (Gusfield's Z-algorithm).
+
+    ``z[i]`` is the length of the longest run starting at ``elements[i]``
+    that matches the run starting at ``elements[0]``. Linear time, over any
+    sequence of elements supporting ``==``, not just characters.
+    """
+    length = len(elements)
+    z = [0] * length
+    left = right = 0
+    for i in range(1, length):
+        if i < right:
+            z[i] = min(right - i, z[i - left])
+        while (
+            i + z[i] < length
+            and elements[z[i]] == elements[i + z[i]]
+        ):
+            z[i] += 1
+        if i + z[i] > right:
+            left, right = i, i + z[i]
+    return z
+
 
 @dataclass(frozen=True)
 class Segment:
@@ -97,6 +122,34 @@ class Sequence:
         """Return whether this sequence is a prefix of ``superseq``."""
         return self.segments == superseq.segments[:len(self.segments)]
 
+    def is_infix_of(self, other):
+        """Return whether this sequence occurs as a contiguous run of ``other``.
+
+        Linear-time Z-algorithm search over segment tuples (not just
+        characters), matching the complexity Theorem thm:star-runtime
+        assumes for the foldability test. ``_SENTINEL`` is a fresh object
+        that no ``Segment``/``LetterAsSegment`` can ever equal, so it safely
+        separates the two runs without needing an alphabet-specific marker.
+        """
+        n, m = len(self), len(other)
+        if n == 0:
+            return True
+        if n > m:
+            return False
+
+        combined = self.segments + (_SENTINEL,) + other.segments
+        z = _z_function(combined)
+        return any(value >= n for value in z[n + 1:])
+
+    def lcp_length(self, other):
+        """Return the length of the longest common prefix with ``other``."""
+        length = 0
+        for a, b in zip(self.segments, other.segments):
+            if a != b:
+                break
+            length += 1
+        return length
+
     def decompose(self, x, y):
         """Return P, Q, and R where ``self = P + Q + R``."""
         return self[:x], self[x:y], self[y:]
@@ -146,6 +199,20 @@ class Sequence:
                 )
 
         return predecessors
+
+    def successors(self):
+        """Return all successor sequences and operations producible from this one.
+
+        Each returned tuple contains ``(child, x, y, is_forward_deletion)``.
+        """
+        successors = set()
+        length = len(self)
+        for x in range(length):
+            for y in range(x + 1, length + 1):
+                successors.add((self.bfb_target(x, y, False), x, y, False))
+                if y < length:
+                    successors.add((self.bfb_target(x, y, True), x, y, True))
+        return successors
 
     @classmethod
     def from_string(cls, seq_str):
