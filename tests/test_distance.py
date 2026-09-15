@@ -2,35 +2,13 @@ from collections import defaultdict
 import math
 import unittest
 
-from bfb_dist.bfb_graph import BFBGraph
 from bfb_dist.distance import BFB_dist, _truncate_G
-from tests.helpers import letters
+from tests.helpers import assert_valid_generated_graph, letters
 
 
 class DistanceTests(unittest.TestCase):
     def assert_valid_generated_graph(self, graph, expected_distance):
-        self.assertIsInstance(graph, BFBGraph)
-        self.assertEqual(graph.calculate_bfb_distance(), expected_distance)
-
-        if expected_distance == 0 or math.isinf(expected_distance):
-            self.assertEqual(graph.adjacency, {graph.source: {}})
-            return
-
-        self.assertNotIn(graph.target, graph.adjacency)
-        for source, children in graph.adjacency.items():
-            self.assertTrue(children)
-            for target, operation in children.items():
-                self.assertEqual(
-                    source.bfb_target(*operation),
-                    target,
-                )
-
-        paths = graph.get_paths()
-        self.assertTrue(paths)
-        for path in paths:
-            self.assertEqual(path[0], graph.source)
-            self.assertEqual(path[-1], graph.target)
-            self.assertEqual(len(path) - 1, expected_distance)
+        assert_valid_generated_graph(self, graph, expected_distance)
 
     def test_direct_python_api_returns_bfb_graph(self):
         source = letters("AB")

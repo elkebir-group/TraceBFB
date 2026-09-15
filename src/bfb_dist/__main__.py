@@ -47,6 +47,7 @@ def handle_simulate(args):
 def handle_bfbdist(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
     from bfb_dist.distance import BFB_dist
+    from bfb_dist.nbfb import NBFB_dist, NBFB_star_dist
     from bfb_dist.sequence import Sequence
 
     try:
@@ -67,7 +68,12 @@ def handle_bfbdist(args):
     except ValueError as error:
         sys.exit(f"Error: {error}")
 
-    graph = BFB_dist(source, target)
+    compute = {
+        "bfb": BFB_dist,
+        "nbfb": NBFB_dist,
+        "nbfb-star": NBFB_star_dist,
+    }[args.mode]
+    graph = compute(source, target)
 
     try:
         with open(f"{args.out}.graph", "w", encoding="utf-8") as output:
@@ -106,6 +112,11 @@ def main():
     dist_parser.add_argument("-i", "--input", type=str, required=True)
     dist_parser.add_argument("-o", "--out", type=str, required=True)
     dist_parser.add_argument("--colored", action="store_true")
+    dist_parser.add_argument(
+        "--mode",
+        choices=["bfb", "nbfb", "nbfb-star"],
+        default="bfb",
+    )
     dist_parser.set_defaults(func=handle_bfbdist)
 
     args = parser.parse_args()
