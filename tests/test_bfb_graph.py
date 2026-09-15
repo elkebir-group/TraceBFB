@@ -4,6 +4,7 @@ import re
 import unittest
 
 from bfb_dist.bfb_graph import BFBGraph
+from bfb_dist.history import Operation, State, start_state
 from tests.helpers import genomic_sequence
 
 
@@ -11,50 +12,59 @@ ANSI = re.compile(r"\033\[[0-9;]*m")
 
 
 def linear_graph():
+    """Return a three-cycle history t-BFB, i-BFB, f-BFB as a graph."""
     source = genomic_sequence(2)
-    first_operation = (0, 1, False)
-    intermediate = source.bfb_target(*first_operation)
-    second_operation = (1, 2, True)
-    target = intermediate.bfb_target(*second_operation)
+    sources = (source,)
+    start = start_state()
+    appended = State(source, 1)
+    first_operation = Operation("i", 0, 1)
+    intermediate = appended.apply(first_operation, sources)
+    second_operation = Operation("f", 1, 2)
+    end = intermediate.apply(second_operation, sources)
     adjacency = {
-        source: {intermediate: first_operation},
-        intermediate: {target: second_operation},
+        start: {appended: Operation.translocation(0)},
+        appended: {intermediate: first_operation},
+        intermediate: {end: second_operation},
     }
-    return BFBGraph(adjacency, source, target), intermediate
+    graph = BFBGraph(adjacency, sources, end.sequence)
+    return graph, appended, intermediate
 
 
 class BFBGraphTests(unittest.TestCase):
     def test_constructor_retains_adjacency_and_optional_distance(self):
-        graph, _ = linear_graph()
+        graph, _, _ = linear_graph()
         adjacency = graph.adjacency
 
         self.assertIs(graph.adjacency, adjacency)
         self.assertFalse(hasattr(graph, "bfb_distance"))
+        self.assertEqual(graph.start, start_state())
+        self.assertEqual(graph.end, State(graph.target, 1))
 
-        cached = BFBGraph(adjacency, graph.source, graph.target, 9)
+        cached = BFBGraph(adjacency, graph.sources, graph.target, 9)
         self.assertEqual(cached.calculate_bfb_distance(), 9)
 
     def test_calculates_and_caches_distance(self):
-        graph, _ = linear_graph()
+        graph, _, _ = linear_graph()
 
-        self.assertEqual(graph.calculate_bfb_distance(), 2)
-        self.assertEqual(graph.bfb_distance, 2)
-        self.assertEqual(graph.calculate_bfb_distance(), 2)
+        self.assertEqual(graph.calculate_bfb_distance(), 3)
+        self.assertEqual(graph.bfb_distance, 3)
+        self.assertEqual(graph.calculate_bfb_distance(), 3)
 
     def test_get_paths_and_formatting(self):
-        graph, intermediate = linear_graph()
+        graph, appended, intermediate = linear_graph()
 
         self.assertEqual(
             graph.get_paths(),
-            [[graph.source, intermediate, graph.target]],
+            [[graph.start, appended, intermediate, graph.end]],
         )
         self.assertIs(graph.get_paths(), graph.paths)
 
         plain = graph.write_paths(colored=False)
         colored = graph.write_paths(colored=True)
+        # The empty start is omitted: one line per cycle.
         self.assertEqual(
             plain.splitlines(),
-            list(map(str, graph.get_paths()[0])),
+            [str(state.sequence) for state in graph.get_paths()[0][1:]],
         )
         self.assertEqual(
             ANSI.sub("", colored).splitlines(),
@@ -63,45 +73,94 @@ class BFBGraphTests(unittest.TestCase):
         self.assertIn("\033[91m", colored)
         self.assertIn("\033[92m", colored)
         self.assertIn("\033[95m", colored)
-        self.assertNotIn("R: ", plain)
-        self.assertNotIn("-> ", plain)
+
+    def test_translocation_lines_are_colored_cyan(self):
+        graph, _, _ = linear_graph()
+        adjacency = {
+            graph.start: {State(graph.sources[0], 1): Operation.translocation(0)}
+        }
+        chain = BFBGraph(adjacency, graph.sources, graph.sources[0])
+
+        colored = chain.write_paths(colored=True)
+
+        self.assertEqual(colored, f"{graph.sources[0]}\n")
+        self.assertNotIn("\033[96m", colored)
+
+        two_step = BFBGraph(
+            {
+                graph.start: {
+                    State(graph.sources[0], 1): Operation.translocation(0)
+                },
+                State(graph.sources[0], 1): {
+                    State(graph.sources[0] + graph.sources[0], 0b11):
+                        Operation.translocation(1)
+                },
+            },
+            (graph.sources[0], graph.sources[0]),
+            graph.sources[0] + graph.sources[0],
+        )
+        colored = two_step.write_paths(colored=True)
+        self.assertIn("\033[96m", colored.splitlines()[0])
 
     def test_text_round_trip(self):
-        graph, _ = linear_graph()
+        graph, _, _ = linear_graph()
         output = StringIO()
         graph.write_text(output)
 
         loaded = BFBGraph.from_text(StringIO(output.getvalue()))
 
-        self.assertEqual(loaded.source, graph.source)
+        self.assertEqual(loaded.sources, graph.sources)
         self.assertEqual(loaded.target, graph.target)
         self.assertEqual(loaded.adjacency, graph.adjacency)
-        self.assertNotIn(loaded.target, loaded.adjacency)
+        self.assertNotIn(loaded.end, loaded.adjacency)
+        self.assertEqual(loaded.calculate_bfb_distance(), 3)
+
+    def test_text_round_trip_with_two_sources(self):
+        first, second = genomic_sequence(1, "chr1"), genomic_sequence(1, "chr2")
+        sources = (first, second)
+        start = start_state()
+        one = State(first, 0b01)
+        both = State(first + second, 0b11)
+        graph = BFBGraph(
+            {
+                start: {one: Operation.translocation(0)},
+                one: {both: Operation.translocation(1)},
+            },
+            sources,
+            first + second,
+        )
+        output = StringIO()
+        graph.write_text(output)
+
+        loaded = BFBGraph.from_text(StringIO(output.getvalue()))
+
+        self.assertEqual(loaded.sources, sources)
+        self.assertEqual(loaded.adjacency, graph.adjacency)
         self.assertEqual(loaded.calculate_bfb_distance(), 2)
 
-    def test_dot_uses_sequence_nodes_without_edge_labels(self):
-        graph, intermediate = linear_graph()
+    def test_dot_labels_edges_with_cycle_kind(self):
+        graph, appended, intermediate = linear_graph()
         output = StringIO()
 
         graph.write_dot(output)
         dot = output.getvalue()
 
-        self.assertIn(f'"{graph.source}" -> "{intermediate}";', dot)
-        self.assertIn(f'"{intermediate}" -> "{graph.target}";', dot)
-        self.assertNotIn("label=", dot)
+        self.assertIn(f'"{graph.start}" -> "{appended}" [label="t"];', dot)
+        self.assertIn(f'"{appended}" -> "{intermediate}" [label="i"];', dot)
+        self.assertIn(f'"{intermediate}" -> "{graph.end}" [label="f"];', dot)
 
     def test_zero_distance_graph(self):
-        source = genomic_sequence(2)
-        graph = BFBGraph({source: {}}, source, source)
+        start = start_state()
+        graph = BFBGraph({start: {}}, (), start.sequence)
 
         self.assertEqual(graph.calculate_bfb_distance(), 0)
-        self.assertEqual(graph.get_paths(), [[source]])
-        self.assertEqual(graph.write_paths(False), f"{source}\n")
+        self.assertEqual(graph.get_paths(), [[start]])
+        self.assertEqual(graph.write_paths(False), "")
 
     def test_unreachable_graph(self):
         source = genomic_sequence(2)
-        target = source.reverse_complement()
-        graph = BFBGraph({source: {}}, source, target)
+        start = start_state()
+        graph = BFBGraph({start: {}}, (source,), source.reverse_complement())
 
         self.assertEqual(graph.calculate_bfb_distance(), math.inf)
         self.assertEqual(graph.get_paths(), [])
@@ -110,91 +169,92 @@ class BFBGraphTests(unittest.TestCase):
 
 class LoadedGraphValidationTests(unittest.TestCase):
     def setUp(self):
-        self.graph, self.intermediate = linear_graph()
-        self.source = self.graph.source
-        self.target = self.graph.target
+        self.graph, self.appended, self.intermediate = linear_graph()
+        self.source = self.graph.sources[0]
+        self.start = self.graph.start
+        self.end = self.graph.end
+        self.header = f"{self.graph.target}\n{self.source}\n"
 
     def assert_invalid(self, text, message):
         with self.assertRaisesRegex(ValueError, message):
             BFBGraph.from_text(StringIO(text))
 
     def test_missing_header(self):
-        self.assert_invalid("", "missing source and target")
+        self.assert_invalid("", "missing target")
+        self.assert_invalid(f"{self.graph.target}\n", "missing source line")
 
-    def test_missing_source_row(self):
+    def test_missing_start_row(self):
+        self.assert_invalid(self.header, "start state has no adjacency row")
+
+    def test_duplicate_row(self):
         self.assert_invalid(
-            f"{self.source}\t{self.target}\n",
-            "source has no adjacency row",
+            self.header + f"{self.start}\n{self.start}\n",
+            "multiple rows have the same node",
         )
 
-    def test_duplicate_source_row(self):
+    def test_invalid_operation(self):
         self.assert_invalid(
-            f"{self.source}\t{self.target}\n"
-            f"{self.source}\n"
-            f"{self.source}\n",
-            "multiple rows have the same source node",
+            self.header + f"{self.start}\t{self.appended},q,0,1\n",
+            "an edge must be",
         )
 
-    def test_invalid_operation_flag(self):
+    def test_inapplicable_operation(self):
         self.assert_invalid(
-            f"{self.source}\t{self.intermediate}\n"
-            f"{self.source}\t{self.intermediate},0,1,2\n",
-            "is_forward_deletion must be 0 or 1",
+            f"{self.source}\n{self.source}\n"
+            f"{self.start}\t{self.appended},p,0,1\n",
+            "not applicable",
         )
 
-    def test_out_of_bounds_operation(self):
+    def test_end_cannot_have_adjacency_row(self):
         self.assert_invalid(
-            f"{self.source}\t{self.intermediate}\n"
-            f"{self.source}\t{self.intermediate},0,0,0\n",
-            "out of bounds",
-        )
-
-    def test_target_cannot_have_adjacency_row(self):
-        direct_target = self.source.bfb_target(0, 1, False)
-        self.assert_invalid(
-            f"{self.source}\t{direct_target}\n"
-            f"{self.source}\t{direct_target},0,1,0\n"
-            f"{direct_target}\n",
-            "target cannot have an adjacency row",
+            f"{self.source}\n{self.source}\n"
+            f"{self.start}\t{self.appended},t,0\n"
+            f"{self.appended}\n",
+            "end state cannot have an adjacency row",
         )
 
     def test_edge_operation_must_generate_child(self):
-        wrong_target = self.source.bfb_target(1, 2, False)
         self.assert_invalid(
-            f"{self.source}\t{wrong_target}\n"
-            f"{self.source}\t{wrong_target},0,1,0\n",
-            "does not generate its target",
+            f"{self.source}\n{self.source}\n"
+            f"{self.start}\t{self.appended},t,1\n",
+            "not applicable",
+        )
+        wrong = State(self.source.reverse_complement(), 1)
+        self.assert_invalid(
+            f"{wrong.sequence}\n{self.source}\n"
+            f"{self.start}\t{wrong},t,0\n",
+            "does not generate its child",
         )
 
     def test_undeclared_intermediate_is_rejected(self):
         self.assert_invalid(
-            f"{self.source}\t{self.target}\n"
-            f"{self.source}\t{self.intermediate},0,1,0\n",
+            self.header + f"{self.start}\t{self.appended},t,0\n",
             "undeclared node",
         )
 
-    def test_source_to_target_paths_must_have_equal_lengths(self):
-        source = genomic_sequence(2)
-        intermediate = source.bfb_target(1, 2, False)
-        target = source.bfb_target(0, 2, False)
+    def test_paths_must_have_equal_lengths(self):
+        # A -> A a -> A a A a takes two p-BFB cycles, while
+        # A -> A a -> A a A -> A a A a takes three; every edge is valid.
+        sources = (genomic_sequence(1),)
+        appended = State(sources[0], 1)
+        aa = appended.apply(Operation("p", 0, 1), sources)
+        aaaa = aa.apply(Operation("p", 0, 2), sources)
+        aaa = aa.apply(Operation("p", 1, 2), sources)
+        self.assertEqual(aaa.apply(Operation("p", 2, 3), sources), aaaa)
         graph = BFBGraph(
             {
-                source: {
-                    intermediate: (1, 2, False),
-                    target: (0, 2, False),
-                },
-                intermediate: {target: (0, 1, False)},
+                self.start: {appended: Operation.translocation(0)},
+                appended: {aa: Operation("p", 0, 1)},
+                aa: {aaaa: Operation("p", 0, 2), aaa: Operation("p", 1, 2)},
+                aaa: {aaaa: Operation("p", 2, 3)},
             },
-            source,
-            target,
+            sources,
+            aaaa.sequence,
         )
         serialized = StringIO()
         graph.write_text(serialized)
 
-        self.assert_invalid(
-            serialized.getvalue(),
-            "paths have different lengths",
-        )
+        self.assert_invalid(serialized.getvalue(), "different lengths")
 
 
 if __name__ == "__main__":

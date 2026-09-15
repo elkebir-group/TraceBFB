@@ -41,10 +41,7 @@ class CLITests(unittest.TestCase):
         source = genomic_sequence(2)
         target = source.bfb_target(0, len(source), False)
         input_path = Path(directory) / "input.txt"
-        input_path.write_text(
-            f"{source}\n{target}\n",
-            encoding="utf-8",
-        )
+        input_path.write_text(f"{source}\n{target}\n", encoding="utf-8")
         return source, target, input_path
 
     def test_distance_outputs_for_colored_run(self):
@@ -53,41 +50,31 @@ class CLITests(unittest.TestCase):
             prefix = Path(directory) / "result"
 
             result = self.run_cli(
-                "distance",
-                "--input",
-                str(input_path),
-                "--out",
-                str(prefix),
+                "distance", "--input", str(input_path), "--out", str(prefix),
                 "--colored",
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stdout.strip(), "2")
             graph_path = Path(f"{prefix}.graph")
             dot_path = Path(f"{prefix}.dot")
             paths_path = Path(f"{prefix}.paths")
             colored_path = Path(f"{prefix}.paths.ansi")
-            for path in (
-                graph_path,
-                dot_path,
-                paths_path,
-                colored_path,
-            ):
+            for path in (graph_path, dot_path, paths_path, colored_path):
                 self.assertTrue(path.is_file(), path)
 
             with graph_path.open(encoding="utf-8") as graph_file:
                 graph = BFBGraph.from_text(graph_file)
-            self.assertEqual((graph.source, graph.target), (source, target))
+            self.assertEqual((graph.sources, graph.target), ((source,), target))
             self.assertIn("digraph BFB_dist", dot_path.read_text("utf-8"))
             plain_lines = paths_path.read_text("utf-8").splitlines()
             colored_text = colored_path.read_text("utf-8")
             self.assertEqual(
                 plain_lines,
-                list(map(str, graph.get_paths()[0])),
+                [str(state.sequence) for state in graph.get_paths()[0][1:]],
             )
             self.assertEqual(
-                ANSI.sub("", colored_text).splitlines(),
-                plain_lines,
+                ANSI.sub("", colored_text).splitlines(), plain_lines
             )
             self.assertIn("\033[92m", colored_text)
 
@@ -97,69 +84,96 @@ class CLITests(unittest.TestCase):
             prefix = Path(directory) / "result"
 
             result = self.run_cli(
-                "distance",
-                "-i",
-                str(input_path),
-                "--out",
-                str(prefix),
+                "distance", "-i", str(input_path), "--out", str(prefix)
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(Path(f"{prefix}.paths.ansi").exists())
 
-    def test_distance_rejects_nonconsecutive_input(self):
+    def test_distance_modes_agree_on_two_sources(self):
+        first = genomic_sequence(2, "chr1")
+        second = genomic_sequence(1, "chr2")
+        target = first.bfb_target(0, 2, False) + second
         with tempfile.TemporaryDirectory() as directory:
             input_path = Path(directory) / "input.txt"
-            input_path.write_text("source\n\ntarget\n", encoding="utf-8")
-
-            result = self.run_cli(
-                "distance",
-                "-i",
-                str(input_path),
-                "--out",
-                str(Path(directory) / "result"),
+            input_path.write_text(
+                f"{first}\n{second}\n{target}\n", encoding="utf-8"
             )
+            for mode in ("bfb", "nbfb", "nbfb-fast", "lcp-monotone"):
+                with self.subTest(mode=mode):
+                    prefix = Path(directory) / mode
+                    result = self.run_cli(
+                        "distance", "-i", str(input_path), "-o", str(prefix),
+                        "--mode", mode,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), "3")
+                    with Path(f"{prefix}.graph").open(encoding="utf-8") as f:
+                        graph = BFBGraph.from_text(f)
+                    self.assertEqual(graph.sources, (first, second))
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("two consecutive nonempty lines", result.stderr)
+    def test_distance_rejects_blank_lines_and_single_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for content in ("source\n\ntarget\n", "chr1:0-10[R]\n"):
+                with self.subTest(content=content):
+                    input_path = Path(directory) / "input.txt"
+                    input_path.write_text(content, encoding="utf-8")
+
+                    result = self.run_cli(
+                        "distance", "-i", str(input_path),
+                        "--out", str(Path(directory) / "result"),
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("one nonempty sequence per line", result.stderr)
 
     def test_simulation_outputs_are_seeded_and_colored(self):
         with tempfile.TemporaryDirectory() as directory:
             prefix = Path(directory) / "simulation"
 
             result = self.run_cli(
-                "simulate",
-                "--seed",
-                "11",
-                "--n-segments",
-                "2",
-                "--cycles",
-                "2",
-                "--out",
-                str(prefix),
-                "--colored",
+                "simulate", "--seed", "11", "--n-sources", "2",
+                "--n-segments", "2", "--cycles", "4", "--short-deletions",
+                "--out", str(prefix), "--colored",
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            input_path = Path(f"{prefix}.input")
             paths_path = Path(f"{prefix}.paths")
             colored_path = Path(f"{prefix}.paths.ansi")
-            self.assertTrue(paths_path.is_file())
-            self.assertTrue(colored_path.is_file())
-            operations = [
+            for path in (input_path, paths_path, colored_path):
+                self.assertTrue(path.is_file(), path)
+            input_lines = input_path.read_text("utf-8").splitlines()
+            self.assertEqual(len(input_lines), 3)
+            history = [
                 Sequence.from_string(line)
                 for line in paths_path.read_text("utf-8").splitlines()
             ]
-            self.assertEqual(len(operations), 3)
-            self.assertIn("\033[91m", colored_path.read_text("utf-8"))
+            self.assertEqual(len(history), 4)
+            self.assertEqual(str(history[-1]), input_lines[-1])
+            colored_text = colored_path.read_text("utf-8")
+            self.assertEqual(
+                ANSI.sub("", colored_text).splitlines(),
+                [str(sequence) for sequence in history],
+            )
+
+            # The simulated instance feeds straight into the distance command.
+            result = self.run_cli(
+                "distance", "-i", str(input_path),
+                "-o", str(Path(directory) / "result"), "--mode", "nbfb-fast",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertLessEqual(int(result.stdout), 4)
 
     def test_python_module_api_works_in_external_process(self):
         code = (
-            "from bfb_dist import BFB_dist, BFBGraph;"
+            "from bfb_dist import BFB_dist, BFBGraph, NBFB_fast_dist;"
             "from bfb_dist.sequence import LetterAsSegment, Sequence;"
             "s=Sequence([LetterAsSegment('A')]);"
-            "g=BFB_dist(s,s);"
+            "g=BFB_dist([s],s);"
             "assert isinstance(g,BFBGraph);"
-            "assert g.bfb_distance == 0"
+            "assert g.bfb_distance == 1;"
+            "assert NBFB_fast_dist([s],s).calculate_bfb_distance() == 1"
         )
 
         result = subprocess.run(
@@ -173,7 +187,7 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_help_lists_distance_not_bfb_dist(self):
+    def test_help_lists_commands(self):
         result = self.run_cli("--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)

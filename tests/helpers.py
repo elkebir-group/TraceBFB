@@ -8,9 +8,9 @@ def letters(text):
     return Sequence(LetterAsSegment(letter) for letter in text)
 
 
-def genomic_sequence(length=3):
+def genomic_sequence(length=3, chromosome="chr1"):
     return Sequence(
-        Segment("chr1", index * 10, (index + 1) * 10, False)
+        Segment(chromosome, index * 10, (index + 1) * 10, False)
         for index in range(length)
     )
 
@@ -20,21 +20,24 @@ def assert_valid_generated_graph(testcase, graph, expected_distance):
     testcase.assertEqual(graph.calculate_bfb_distance(), expected_distance)
 
     if expected_distance == 0 or math.isinf(expected_distance):
-        testcase.assertEqual(graph.adjacency, {graph.source: {}})
+        testcase.assertEqual(graph.adjacency, {graph.start: {}})
         return
 
-    testcase.assertNotIn(graph.target, graph.adjacency)
-    for source, children in graph.adjacency.items():
+    testcase.assertNotIn(graph.end, graph.adjacency)
+    for node, children in graph.adjacency.items():
         testcase.assertTrue(children)
-        for target, operation in children.items():
-            testcase.assertEqual(
-                source.bfb_target(*operation),
-                target,
-            )
+        for child, operation in children.items():
+            testcase.assertEqual(node.apply(operation, graph.sources), child)
 
     paths = graph.get_paths()
     testcase.assertTrue(paths)
     for path in paths:
-        testcase.assertEqual(path[0], graph.source)
-        testcase.assertEqual(path[-1], graph.target)
+        testcase.assertEqual(path[0], graph.start)
+        testcase.assertEqual(path[-1], graph.end)
         testcase.assertEqual(len(path) - 1, expected_distance)
+        kinds = [
+            graph.adjacency[node][child].kind
+            for node, child in zip(path, path[1:])
+        ]
+        testcase.assertEqual(kinds[0], "t")
+        testcase.assertEqual(kinds.count("t"), len(graph.sources))

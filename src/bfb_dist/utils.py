@@ -69,3 +69,20 @@ def format_sequence(parts, colored=False):
         )
         for segment in part.segments
     )
+
+
+def format_operation_line(sequence, operation, colored=False):
+    """Format the sequence a cycle acts on, colored by the cycle.
+
+    For p-, i-, and f-BFB cycles, P is red, Q is green, and R is purple.
+    For a t-BFB cycle, the whole sequence is cyan, as the cycle appends a
+    source without decomposing the sequence.
+    """
+    if not colored:
+        return str(sequence)
+    if operation.kind == "t":
+        return ";".join(format_cyan(segment) for segment in sequence.segments)
+    return format_sequence(
+        sequence.decompose(operation.x, operation.y),
+        colored=True,
+    )

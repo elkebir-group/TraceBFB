@@ -101,6 +101,15 @@ class SequenceTests(unittest.TestCase):
                 child.previous_bfb(),
             )
 
+    def test_suffix_helpers(self):
+        self.assertTrue(letters("BC").is_suffix_of(letters("ABC")))
+        self.assertTrue(letters("").is_suffix_of(letters("ABC")))
+        self.assertFalse(letters("AB").is_suffix_of(letters("ABC")))
+        self.assertFalse(letters("ABCD").is_suffix_of(letters("ABC")))
+        self.assertEqual(letters("ABC").strip_suffix(letters("BC")), letters("A"))
+        self.assertEqual(letters("ABC").strip_suffix(letters("ABC")), letters(""))
+        self.assertIsNone(letters("ABC").strip_suffix(letters("AB")))
+
     def test_lcp_length(self):
         self.assertEqual(
             letters("ABC").lcp_length(letters("ABD")),
