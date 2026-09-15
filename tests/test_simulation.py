@@ -3,13 +3,15 @@ from io import StringIO
 import re
 import unittest
 
+from bfb_dist.history import start_state
 from bfb_dist.sequence import Sequence
 from bfb_dist.simulation import (
     _set_seed,
-    simulate_bfb,
+    simulate_history,
     simulate_reference_sequence,
+    simulate_sources,
 )
-from tests.helpers import genomic_sequence
+from tests.helpers import genomic_sequence, letters
 
 
 ANSI = re.compile(r"\033\[[0-9;]*m")
@@ -34,6 +36,7 @@ class ReferenceSimulationTests(unittest.TestCase):
             (2, 0, 20, None),
             (2, 20, 10, None),
             (2, 10, 20, -1),
+            (2, 10, 20000, None, "chrM"),
         )
 
         for arguments in invalid_arguments:
@@ -41,62 +44,88 @@ class ReferenceSimulationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     simulate_reference_sequence(*arguments)
 
+    def test_sources_lie_on_distinct_chromosomes(self):
+        _set_seed(5)
+        sources = simulate_sources(3, 2, 10, 20)
 
-class BFBSimulationTests(unittest.TestCase):
-    def test_simulation_is_reproducible_and_silent(self):
-        reference = genomic_sequence(3)
+        self.assertEqual(len(sources), 3)
+        chromosomes = {source[0].chr for source in sources}
+        self.assertEqual(len(chromosomes), 3)
+        for source in sources:
+            self.assertEqual(len(source), 2)
+            self.assertEqual({segment.chr for segment in source.segments}, {source[0].chr})
+
+    def test_invalid_source_count(self):
+        with self.assertRaises(ValueError):
+            simulate_sources(0, 2)
+
+
+class HistorySimulationTests(unittest.TestCase):
+    def assert_valid_history(self, steps, sources, num_cycles):
+        self.assertEqual(len(steps), num_cycles + 1)
+        self.assertEqual(steps[0][0], start_state())
+        self.assertEqual(steps[0][1].kind, "t")
+        self.assertIsNone(steps[-1][1])
+        appended = []
+        for (state, operation), (child, _) in zip(steps, steps[1:]):
+            self.assertEqual(state.apply(operation, sources), child)
+            if operation.kind == "t":
+                appended.append(operation.source)
+        self.assertEqual(sorted(appended), list(range(len(sources))))
+
+    def test_history_is_reproducible_and_silent(self):
+        sources = [genomic_sequence(3, "chr1"), genomic_sequence(2, "chr2")]
         stdout = StringIO()
 
         _set_seed(29)
         with redirect_stdout(stdout):
-            first_ops, first_color = simulate_bfb(reference, 3, True)
+            first_steps, first_color = simulate_history(sources, 5, False, True)
         _set_seed(29)
-        second_ops, second_color = simulate_bfb(reference, 3, True)
+        second_steps, second_color = simulate_history(sources, 5, False, True)
 
         self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(first_ops, second_ops)
+        self.assertEqual(first_steps, second_steps)
         self.assertEqual(first_color, second_color)
-        self.assertEqual(len(first_ops), 4)
-        self.assertIn("\033[91m", first_color)
+        self.assert_valid_history(first_steps, sources, 5)
         self.assertEqual(
-            [
-                ANSI.sub("", line)
-                for line in first_color.splitlines()
-            ],
-            list(map(str, first_ops)),
+            [ANSI.sub("", line) for line in first_color.splitlines()],
+            [str(state.sequence) for state, _ in first_steps[1:]],
         )
 
-        for source, target in zip(first_ops, first_ops[1:]):
-            self.assertTrue(
-                any(
-                    predecessor == source
-                    for predecessor, _, _, _ in target.previous_bfb()
-                )
-            )
+    def test_short_deletions_bound_every_forward_overhang(self):
+        sources = [letters("ABCD"), letters("EF")]
+        for seed in range(30):
+            _set_seed(seed)
+            steps, color_output = simulate_history(sources, 7, True)
+            self.assertIsNone(color_output)
+            self.assert_valid_history(steps, sources, 7)
+            previous_gain = None
+            for state, operation in steps[:-1]:
+                if operation.kind == "t":
+                    gain = len(sources[operation.source])
+                else:
+                    gain = operation.y - operation.x
+                    if operation.kind == "f":
+                        overhang = len(state.sequence) - operation.y
+                        self.assertLess(overhang, previous_gain)
+                previous_gain = gain
 
-    def test_uncolored_simulation_returns_no_color_string(self):
-        operations, color_output = simulate_bfb(
-            genomic_sequence(2),
-            0,
-            False,
-        )
+    def test_single_source_single_cycle(self):
+        source = genomic_sequence(2)
 
-        self.assertEqual(len(operations), 1)
-        self.assertIsNone(color_output)
+        steps, color_output = simulate_history([source], 1, False, True)
 
-    def test_colored_zero_cycle_representation(self):
-        reference = genomic_sequence(2)
+        self.assertEqual(len(steps), 2)
+        self.assertEqual(steps[-1][0].sequence, source)
+        self.assertEqual(color_output, f"{source}\n")
 
-        operations, color_output = simulate_bfb(reference, 0, True)
-
-        self.assertEqual(operations, [reference])
-        self.assertEqual(color_output, f"{reference}\n")
-
-    def test_invalid_cycle_arguments(self):
-        with self.assertRaisesRegex(ValueError, "cannot be negative"):
-            simulate_bfb(genomic_sequence(1), -1)
+    def test_invalid_history_arguments(self):
+        with self.assertRaisesRegex(ValueError, "at least one source"):
+            simulate_history([], 1)
         with self.assertRaisesRegex(ValueError, "cannot be empty"):
-            simulate_bfb(Sequence(), 1)
+            simulate_history([Sequence()], 1)
+        with self.assertRaisesRegex(ValueError, "cannot be smaller"):
+            simulate_history([genomic_sequence(1)] * 2, 1)
 
 
 if __name__ == "__main__":

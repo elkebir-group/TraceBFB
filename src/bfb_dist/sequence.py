@@ -122,6 +122,19 @@ class Sequence:
         """Return whether this sequence is a prefix of ``superseq``."""
         return self.segments == superseq.segments[:len(self.segments)]
 
+    def is_suffix_of(self, superseq):
+        """Return whether this sequence is a suffix of ``superseq``."""
+        length = len(self.segments)
+        if length == 0:
+            return True
+        return self.segments == superseq.segments[-length:]
+
+    def strip_suffix(self, suffix):
+        """Return the sequence without ``suffix``, or ``None`` if absent."""
+        if not suffix.is_suffix_of(self):
+            return None
+        return self[:len(self) - len(suffix)]
+
     def is_infix_of(self, other):
         """Return whether this sequence occurs as a contiguous run of ``other``.
 
