@@ -28,9 +28,7 @@ from bfb_dist.bfb_graph import BFBGraph
 from bfb_dist.history import (
     Operation,
     State,
-    end_state,
     start_state,
-    total_source_length,
     validate_sources,
 )
 
@@ -112,6 +110,43 @@ class _FastSearch:
             self.lce_tz[index] = self.lce_tx[index]
         self._occ = {}
         self._minb = {}
+
+        # Tables for t-BFB cycles that keep the matched prefix. Such a cycle
+        # appends a source y to a nonempty tail u and is admitted when the
+        # produced tail u y is foldable, i.e. when the reverse complement
+        # ybar ubar occurs in t. ``xbar_pos[y]`` lists the start positions of
+        # ybar in t; ``ext_w[y][a]`` is the longest match of t[a..] after such
+        # an occurrence, with its position; ``ext_t[y][x]`` is the longest
+        # match of xbar after such an occurrence, with its position.
+        self.xbar_pos = []
+        for index in range(self.m):
+            length = self.source_len[index]
+            table = self.lce_txbar[index]
+            self.xbar_pos.append(
+                [p for p in range(1, n - length + 2) if table[p][1] >= length]
+            )
+        self.ext_w = []
+        for y in range(self.m):
+            ly = self.source_len[y]
+            row = [(0, 0)] * (n + 2)
+            for a in range(1, n + 1):
+                best = (0, 0)
+                for p in self.xbar_pos[y]:
+                    value = self.lce_tt[p + ly][a]
+                    if value > best[0]:
+                        best = (value, p)
+                row[a] = best
+            self.ext_w.append(row)
+        self.ext_t = [[(0, 0)] * self.m for _ in range(self.m)]
+        for y in range(self.m):
+            ly = self.source_len[y]
+            for x in range(self.m):
+                best = (0, 0)
+                for p in self.xbar_pos[y]:
+                    value = self.lce_txbar[x][p + ly][1]
+                    if value > best[0]:
+                        best = (value, p)
+                self.ext_t[y][x] = best
 
         self.dist = {}
         self.parent = {}
@@ -213,9 +248,14 @@ class _FastSearch:
                 continue
             length = self.source_len[index]
             j = min(length, self.lce_xt[index][1][phi + 1])
-            if j < 1:
+            if j >= 1:
+                node = ("E", phi + length) if j == length else ("T", phi, index)
+            elif self.xbar_pos[index]:
+                # The prefix is kept; the tail x is foldable as xbar occurs.
+                p = self.xbar_pos[index][0]
+                node = ("W", phi, p, p + length - 1)
+            else:
                 continue
-            node = ("E", phi + length) if j == length else ("T", phi, index)
             self.visit(
                 mask | 1 << index, node, key, Operation.translocation(index)
             )
@@ -327,12 +367,30 @@ class _FastSearch:
                 lambda v, c=c: Operation("f", beta_min + (v - P), c),
             )
 
+        # t-BFB cycles that keep the matched prefix: appending y to the tail
+        # u is admitted when ybar ubar occurs in t, and the successor is the
+        # window node whose window spells ybar ubar.
+        for y in range(self.m):
+            if mask >> y & 1:
+                continue
+            ly = self.source_len[y]
+            if node[0] == "W":
+                L, p = self.ext_w[y][a]
+            else:
+                L, p = self.ext_t[y][index]
+            if L >= lam:
+                self.visit(
+                    mask | 1 << y,
+                    ("W", phi, p, p + ly + lam - 1),
+                    key,
+                    Operation.translocation(y),
+                )
+
     # -- search -----------------------------------------------------------
 
     def run(self):
         """Return the goal key if reached, else ``None``."""
         start = (0, ("E", 0))
-        goal = ((1 << self.m) - 1, ("E", self.n))
         self.dist[start] = 0
         self.parent[start] = None
         self._e_family(0).remove(0)
@@ -340,9 +398,9 @@ class _FastSearch:
 
         while self.queue:
             key = self.queue.popleft()
-            if key == goal:
-                return key
             mask, node = key
+            if node == ("E", self.n):
+                return key
             if node[0] == "E":
                 self.expand_empty(mask, node[1], key)
             else:
@@ -389,11 +447,9 @@ def NBFB_fast_dist(sources, target):
             and the sequence-level definitions.
     """
     sources = validate_sources(sources)
-    start, end = start_state(), end_state(sources, target)
-    if start == end:
+    start = start_state()
+    if len(target) == 0:
         return BFBGraph({start: {}}, sources, target, 0)
-    if total_source_length(sources) > len(target):
-        return BFBGraph({start: {}}, sources, target, math.inf)
 
     search = _FastSearch(sources, target)
     goal = search.run()
@@ -412,8 +468,8 @@ def NBFB_fast_dist(sources, target):
         child = state.apply(operation, sources)
         adjacency[state] = {child: operation}
         state = child
-    if state != end:
+    if state.sequence != target:
         raise RuntimeError(
-            f"replayed history reached {state} instead of {end}"
+            f"replayed history reached {state} instead of the target"
         )
     return BFBGraph(adjacency, sources, target, len(adjacency))

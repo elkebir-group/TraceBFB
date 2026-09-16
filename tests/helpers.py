@@ -23,7 +23,8 @@ def assert_valid_generated_graph(testcase, graph, expected_distance):
         testcase.assertEqual(graph.adjacency, {graph.start: {}})
         return
 
-    testcase.assertNotIn(graph.end, graph.adjacency)
+    for node in graph.adjacency:
+        testcase.assertFalse(graph.is_end(node))
     for node, children in graph.adjacency.items():
         testcase.assertTrue(children)
         for child, operation in children.items():
@@ -33,11 +34,13 @@ def assert_valid_generated_graph(testcase, graph, expected_distance):
     testcase.assertTrue(paths)
     for path in paths:
         testcase.assertEqual(path[0], graph.start)
-        testcase.assertEqual(path[-1], graph.end)
+        testcase.assertTrue(graph.is_end(path[-1]))
         testcase.assertEqual(len(path) - 1, expected_distance)
         kinds = [
             graph.adjacency[node][child].kind
             for node, child in zip(path, path[1:])
         ]
         testcase.assertEqual(kinds[0], "t")
-        testcase.assertEqual(kinds.count("t"), len(graph.sources))
+        used = bin(path[-1].used).count("1")
+        testcase.assertEqual(kinds.count("t"), used)
+        testcase.assertLessEqual(used, len(graph.sources))

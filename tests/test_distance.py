@@ -2,7 +2,7 @@ from collections import defaultdict
 import math
 import unittest
 
-from bfb_dist.distance import BFB_dist, _truncate_G
+from bfb_dist.distance import BFB_dist, _relabel_forward
 from bfb_dist.history import Operation, State, start_state
 from tests.helpers import assert_valid_generated_graph, letters
 
@@ -39,8 +39,6 @@ class DistanceTests(unittest.TestCase):
     def test_unreachable_targets(self):
         cases = [
             ([letters("AB")], letters("C")),
-            ([letters("A")], letters("")),
-            ([letters("AB"), letters("C")], letters("ABb")),
             ([letters("ABC")], letters("AB")),
         ]
         for sources, target in cases:
@@ -127,32 +125,50 @@ class DistanceTests(unittest.TestCase):
         graph = BFB_dist([letters("A"), letters("A")], letters("AaA"))
 
         self.assert_valid_generated_graph(graph, 3)
-        # Both orders of appending the two copies are minimum histories.
-        self.assertEqual(len(graph.get_paths()), 2)
+        # Both orders of appending the two copies are minimum histories, and
+        # so is appending either copy alone followed by two p-BFB cycles
+        # (A -> A a -> A a A), as sources are appended at most once.
+        self.assertEqual(len(graph.get_paths()), 4)
+        self.assertEqual(
+            sorted(path[-1].used for path in graph.get_paths()),
+            [0b01, 0b10, 0b11, 0b11],
+        )
 
     def test_source_may_be_appended_after_fold_backs(self):
         graph = BFB_dist([letters("AB"), letters("C")], letters("ABCcbb"))
 
         self.assert_valid_generated_graph(graph, 4)
 
-    def test_truncation_removes_nodes_not_reachable_from_start(self):
-        sources = (letters("AB"),)
-        start = start_state()
-        source = State(letters("AB"), 1)
+    def test_relabeling_removes_unused_sources_and_stray_nodes(self):
+        # Backward labels carry the unused source 1 (``Z``) along the whole
+        # history; relabeling from the empty-sequence state drops it.
+        sources = (letters("AB"), letters("Z"))
+        start_backward = State(letters(""), 0b10)
+        source = State(letters("AB"), 0b11)
         intermediate = source.apply(Operation("i", 0, 1), sources)
         target = intermediate.apply(Operation("f", 1, 2), sources)
-        stray = State(letters("Z"), 1)
+        stray = State(letters("Z"), 0b11)
         G = defaultdict(dict)
-        G[start][source] = Operation.translocation(0)
+        G[start_backward][source] = Operation.translocation(0)
         G[source][intermediate] = Operation("i", 0, 1)
         G[intermediate][target] = Operation("f", 1, 2)
-        G[stray][State(letters("Zz"), 1)] = Operation("p", 0, 1)
+        G[stray][State(letters("Zz"), 0b11)] = Operation("p", 0, 1)
 
-        adjacency = _truncate_G(G, start)
+        adjacency = _relabel_forward(G, [start_backward])
 
-        self.assertEqual(set(adjacency), {start, source, intermediate})
-        self.assertNotIn(target, adjacency)
+        forward_source = State(letters("AB"), 0b01)
+        self.assertEqual(
+            set(adjacency),
+            {start_state(), forward_source, State(intermediate.sequence, 0b01)},
+        )
+        self.assertEqual(
+            adjacency[start_state()],
+            {forward_source: Operation.translocation(0)},
+        )
         self.assertNotIn(stray, adjacency)
+        for children in adjacency.values():
+            for child in children:
+                self.assertEqual(child.used, 0b01)
 
     def _path_operations(self, graph):
         path = graph.get_paths()[0]

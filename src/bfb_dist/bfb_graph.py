@@ -20,8 +20,10 @@ class BFBGraph:
     each non-end node to a mapping from child states to the
     :class:`~bfb_dist.history.Operation` producing them. Every history
     starts at ``start`` (the empty sequence with no source appended) and
-    ends at ``end`` (the target with every source appended). The graph and
-    its cached results must not be mutated.
+    ends at an *end state*, a state whose sequence is the target. Sources
+    are appended at most once, so histories may end with different sets of
+    appended sources; ``end`` is the end state that appends every source.
+    The graph and its cached results must not be mutated.
     """
 
     def __init__(self, adjacency, sources, target, bfb_distance=None):
@@ -34,10 +36,26 @@ class BFBGraph:
         if bfb_distance is not None:
             self.bfb_distance = bfb_distance
 
+    def is_end(self, state):
+        """Return whether ``state`` is an end state, i.e. spells the target."""
+        return state.sequence == self.target
+
+    @property
+    def ends(self):
+        """Return the set of end states of the graph."""
+        if len(self.target) == 0:
+            return {self.start}
+        return {
+            child
+            for children in self.adjacency.values()
+            for child in children
+            if self.is_end(child)
+        }
+
     def calculate_bfb_distance(self):
         """Calculate, cache, and return the length of a shortest history.
 
-        Returns ``math.inf`` when the end state is unreachable. Valid BFB
+        Returns ``math.inf`` when no end state is reachable. Valid BFB
         graphs have equal-length start-to-end paths, so following any child
         is sufficient.
         """
@@ -46,7 +64,7 @@ class BFBGraph:
 
         node = self.start
         distance = 0
-        while node != self.end:
+        while not self.is_end(node):
             children = self.adjacency.get(node)
             if not children:
                 distance = math.inf
@@ -180,7 +198,7 @@ class BFBGraph:
         if hasattr(self, "paths"):
             return self.paths
 
-        if self.start == self.end:
+        if self.is_end(self.start):
             self.paths = [[self.start]]
             return self.paths
         if not self.adjacency.get(self.start):
@@ -196,7 +214,7 @@ class BFBGraph:
 
         def visit(node):
             """Append every path reachable from ``node`` to the cache."""
-            if node == self.end:
+            if self.is_end(node):
                 self.paths.append(path.copy())
                 return
             for child in ordered_children[node]:
@@ -265,7 +283,7 @@ class BFBGraph:
             raise ValueError(
                 "Invalid graph format: start state has no adjacency row"
             )
-        if self.start == self.end:
+        if self.is_end(self.start):
             if len(self.adjacency) != 1 or self.adjacency[self.start]:
                 raise ValueError(
                     "Invalid graph format: a zero-distance graph must "
@@ -281,10 +299,12 @@ class BFBGraph:
                 )
             return
 
-        if self.end in self.adjacency:
-            raise ValueError(
-                "Invalid graph format: end state cannot have an adjacency row"
-            )
+        for node in self.adjacency:
+            if self.is_end(node):
+                raise ValueError(
+                    "Invalid graph format: end state cannot have an "
+                    f"adjacency row: {node}"
+                )
 
         # Valid BFB edges strictly increase sequence length, so the graph
         # cannot contain cycles.
@@ -300,7 +320,7 @@ class BFBGraph:
                     f"outgoing edge: {node}"
                 )
             for child, operation in children.items():
-                if child != self.end and child not in self.adjacency:
+                if not self.is_end(child) and child not in self.adjacency:
                     raise ValueError(
                         "Invalid graph format: edge points to an "
                         f"undeclared node: {child}"
@@ -328,10 +348,10 @@ class BFBGraph:
 
                 if child not in reachable:
                     reachable.add(child)
-                    if child != self.end:
+                    if not self.is_end(child):
                         pending.append(child)
 
-        nodes = set(self.adjacency) | {self.end}
+        nodes = set(self.adjacency) | self.ends
         if reachable != nodes:
             raise ValueError(
                 "Invalid graph format: graph contains nodes that are "
