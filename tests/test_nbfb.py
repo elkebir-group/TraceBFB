@@ -37,9 +37,8 @@ class NbfbTests(unittest.TestCase):
     def test_unreachable_target(self):
         cases = [
             ([letters("AB")], letters("C")),
-            ([letters("A")], letters("")),
-            ([letters("AB"), letters("C")], letters("ABb")),
             ([letters("C"), letters("AB")], letters("CbAB")),
+            ([letters("ABC")], letters("AB")),
         ]
         for algorithm in ALGORITHMS:
             for sources, target in cases:

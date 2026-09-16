@@ -1,0 +1,17 @@
+HG008 chr19 (germline ZABCDEFGP): k<=1 states=42 time=0.0s goals=0
+HG008 chr19 (germline ZABCDEFGP): k<=2 states=213 time=0.0s goals=0
+HG008 chr19 (germline ZABCDEFGP): k<=3 states=493 time=0.0s goals=2
+HG008 chr19 (germline ZABCDEFGP): k<=4 states=1667 time=0.1s goals=30
+  sources used=3 distance=5 folds=2 t-runs=1 kinds=tttii used=['ZABC', 'F', 'EFGP']
+  sources used=4 distance=5 folds=1 t-runs=2 kinds=tttit used=['ZABC', 'F', 'EFGP', 'B']
+COLO829 chr3p, no inserts (arm only): k<=1 states=109 time=0.0s goals=1
+COLO829 chr3p, no inserts (arm only): k<=2 states=3479 time=0.5s goals=51
+  sources used=1 distance=5 folds=4 t-runs=1 kinds=tifpf used=['ZYCBXAEW']
+  sources used=2 distance=5 folds=3 t-runs=2 kinds=tifpt used=['ZYCBXAEW', 'XA']
+COLO829 chr3p with inserts (arm, chr6 UV, chr10 N, chr12 M): k<=1 states=91 time=0.0s goals=0
+COLO829 chr3p with inserts (arm, chr6 UV, chr10 N, chr12 M): k<=2 states=2067 time=0.3s goals=0
+COLO829 chr3p with inserts (arm, chr6 UV, chr10 N, chr12 M): k<=3 states=19195 time=4.1s goals=0
+COLO829 chr3p with inserts (arm, chr6 UV, chr10 N, chr12 M): k<=4 states=125530 time=36.2s goals=2
+COLO829 chr3p with inserts (arm, chr6 UV, chr10 N, chr12 M): k<=5 states=794873 time=266.8s goals=106
+  sources used=4 distance=8 folds=4 t-runs=3 kinds=tiftittf used=['ZYCBXAEW', 'UV', 'N', 'M']
+  sources used=5 distance=8 folds=3 t-runs=3 kinds=tiftittt used=['ZYCBXAEW', 'UV', 'm', 'n', 'XA']

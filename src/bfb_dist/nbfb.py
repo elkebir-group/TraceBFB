@@ -13,9 +13,7 @@ from bfb_dist.bfb_graph import BFBGraph
 from bfb_dist.history import (
     Operation,
     State,
-    end_state,
     start_state,
-    total_source_length,
     validate_sources,
 )
 
@@ -26,21 +24,21 @@ def _is_foldable(sequence, target):
     return len(tail) == 0 or tail.reverse_complement().is_infix_of(target)
 
 
-def _truncate_G(G, start, end):
-    """Return adjacency rows for nodes with a recorded path to ``end``.
+def _truncate_G(G, start, ends):
+    """Return adjacency rows for nodes with a recorded path to an end state.
 
     The search explores forward from ``start``, so every key of ``G`` is
     reachable from ``start`` by construction; the missing property is
-    reachability *to* ``end``. This walks backward from ``end`` over the
-    reversed edges to find it.
+    reachability *to* a state in ``ends``. This walks backward from the end
+    states over the reversed edges to find it.
     """
     parents_of = defaultdict(list)
     for node, children in G.items():
         for child in children:
             parents_of[child].append(node)
 
-    reachable = {end}
-    pending = deque([end])
+    reachable = set(ends)
+    pending = deque(ends)
     while pending:
         node = pending.popleft()
         for parent in parents_of[node]:
@@ -61,17 +59,22 @@ def _truncate_G(G, start, end):
 
 
 def _successors(node, sources, target, foldable):
-    """Yield ``(child, operation)`` pairs that extend the matched prefix.
+    """Yield ``(child, operation)`` pairs of one BFB cycle.
 
-    Children of p-, i-, and f-BFB cycles must have a foldable tail when
-    ``foldable`` is true. Children of t-BFB cycles are exempt, as the
-    appended source is given rather than produced by a fold-back.
+    Children of p-, i-, and f-BFB cycles must strictly extend the matched
+    prefix and, when ``foldable`` is true, have a foldable tail. Children of
+    t-BFB cycles may keep the matched prefix unchanged; a child that extends
+    the prefix is exempt from foldability, as the appended source is given
+    rather than produced by a fold-back, whereas a child that keeps the
+    prefix must have a foldable tail when ``foldable`` is true. Children
+    longer than the target are discarded, as no cycle shortens a sequence.
     """
     sequence = node.sequence
     phi = sequence.lcp_length(target)
+    n = len(target)
 
     for child, x, y, is_forward_deletion in sequence.successors():
-        if child.lcp_length(target) <= phi:
+        if len(child) > n or child.lcp_length(target) <= phi:
             continue
         if foldable and not _is_foldable(child, target):
             continue
@@ -84,24 +87,26 @@ def _successors(node, sources, target, foldable):
         if node.has_used(index):
             continue
         child = sequence + source
-        if child.lcp_length(target) <= phi:
+        if len(child) > n:
             continue
+        if child.lcp_length(target) <= phi and foldable:
+            if not _is_foldable(child, target):
+                continue
         yield State(child, node.used | 1 << index), Operation.translocation(index)
 
 
 def _search(sources, target, foldable):
     """Infer every minimum-length history in the selected class."""
     sources = validate_sources(sources)
-    start, end = start_state(), end_state(sources, target)
-    if start == end:
+    start = start_state()
+    if len(target) == 0:
         return BFBGraph({start: {}}, sources, target, 0)
-    if total_source_length(sources) > len(target):
-        return BFBGraph({start: {}}, sources, target, math.inf)
 
     pending = deque([start])
     G = defaultdict(dict)
     cost = {start: 0}
     bfb_distance = math.inf
+    ends = []
 
     while pending:
         node = pending.popleft()
@@ -113,13 +118,14 @@ def _search(sources, target, foldable):
             if child not in cost:
                 cost[child] = new_cost
                 pending.append(child)
-                if child == end:
+                if child.sequence == target:
                     bfb_distance = new_cost
+                    ends.append(child)
 
             if cost[child] == new_cost:
                 G[node][child] = operation
 
-    adjacency = _truncate_G(G, start, end)
+    adjacency = _truncate_G(G, start, ends)
     return BFBGraph(adjacency, sources, target, bfb_distance)
 
 
