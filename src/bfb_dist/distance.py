@@ -4,95 +4,76 @@ from collections import defaultdict, deque
 import math
 
 from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.history import (
-    Operation,
-    State,
-    end_state,
-    mask_indices,
-    start_state,
-    validate_sources,
-)
+from bfb_dist.history import Operation, State, start_state, validate_sources
 
 
-def _relabel_forward(G, starts):
-    """Return forward adjacency rows reachable from the empty-sequence states.
+def _relabel_forward(G, start_backward, total):
+    """Return forward adjacency rows reachable from the empty-sequence state.
 
-    The backward search labels a state with the set ``R`` of sources not yet
-    stripped, which equals the sources appended so far plus the sources the
-    history never uses. Each empty-sequence state in ``starts`` carries
-    exactly the unused set ``N`` of the histories through it, so removing
-    ``N`` from every label along those histories yields the forward
-    convention in which the empty sequence has no source appended and every
-    label is the set of sources appended so far.
+    The backward search counts the t-BFB cycles it has reversed so far.
+    Every history found has ``total`` t-BFB cycles, so a node reached after
+    reversing ``c`` of them has ``total - c`` applied in the forward
+    direction. The result uses that forward count as the state label.
     """
+
+    def forward(node):
+        return State(node.sequence, total - node.translocations)
+
     adjacency = {}
-    for start_node in starts:
-        unused = start_node.used
-        seen = {start_node}
-        pending = [start_node]
-        while pending:
-            node = pending.pop()
-            children = G.get(node)
-            if not children:
-                continue
-            row = adjacency.setdefault(
-                State(node.sequence, node.used & ~unused), {}
-            )
-            for child, operation in children.items():
-                row[State(child.sequence, child.used & ~unused)] = operation
-                if child not in seen:
-                    seen.add(child)
-                    pending.append(child)
+    seen = {start_backward}
+    pending = [start_backward]
+    while pending:
+        node = pending.pop()
+        children = G.get(node)
+        if not children:
+            continue
+        row = adjacency.setdefault(forward(node), {})
+        for child, operation in children.items():
+            row[forward(child)] = operation
+            if child not in seen:
+                seen.add(child)
+                pending.append(child)
     return adjacency or {start_state(): {}}
 
 
-def _predecessors(node, sources):
+def _predecessors(node, sources, max_translocations):
     """Yield ``(predecessor, operation)`` pairs producing ``node``.
 
-    Reversed p-, i-, and f-BFB cycles keep the set of appended sources.
-    A reversed t-BFB cycle strips a source that is a suffix of the sequence
-    and removes the source from the set.
+    Reversed p-, i-, and f-BFB cycles keep the count of reversed t-BFB
+    cycles. A reversed t-BFB cycle strips a source that is a suffix of the
+    sequence and raises the count, up to ``max_translocations``.
     """
     sequence = node.sequence
     for predecessor, x, y, is_forward_deletion in sequence.previous_bfb():
         operation = Operation.fold_back(
             x, y, is_forward_deletion, len(predecessor)
         )
-        yield State(predecessor, node.used), operation
+        yield State(predecessor, node.translocations), operation
 
-    for index in mask_indices(node.used):
-        predecessor = sequence.strip_suffix(sources[index])
+    if node.translocations >= max_translocations:
+        return
+    for index, source in enumerate(sources):
+        predecessor = sequence.strip_suffix(source)
         if predecessor is not None:
             yield (
-                State(predecessor, node.used & ~(1 << index)),
+                State(predecessor, node.translocations + 1),
                 Operation.translocation(index),
             )
 
 
-def BFB_dist(sources, target):
-    """Infer every minimum-length history over ``sources`` reaching ``target``.
+def _bounded_search(sources, target, max_translocations):
+    """Backward breadth-first search reversing at most ``max_translocations``
+    t-BFB cycles.
 
-    The returned :class:`~bfb_dist.bfb_graph.BFBGraph` contains only edges
-    between consecutive distance layers. Its distance is the number of
-    cycles of a shortest history, counting the t-BFB cycles, zero when the
-    target is empty, and ``math.inf`` when the target is unreachable. Each
-    source is appended at most once; sources a shortest history does not
-    need are left unused.
+    Returns the layered graph, the empty-sequence state of the first layer
+    reaching it (``None`` if none does), and that layer's index.
     """
-    sources = validate_sources(sources)
-    start = start_state()
-    if len(target) == 0:
-        return BFBGraph({start: {}}, sources, target, 0)
-
-    # The search runs backward from the target with every source available
-    # and stops at the first layer holding an empty sequence; the sources
-    # still available there are the ones the history leaves unused.
-    full = end_state(sources, target)
-    pending = deque([full])
+    end = State(target, 0)
+    pending = deque([end])
     G = defaultdict(dict)
-    cost = {full: 0}
+    cost = {end: 0}
     bfb_distance = math.inf
-    starts = []
+    start_backward = None
 
     while pending:
         node = pending.popleft()
@@ -100,16 +81,50 @@ def BFB_dist(sources, target):
             break
 
         new_cost = cost[node] + 1
-        for predecessor, operation in _predecessors(node, sources):
+        for predecessor, operation in _predecessors(
+            node, sources, max_translocations
+        ):
             if predecessor not in cost:
                 cost[predecessor] = new_cost
                 pending.append(predecessor)
                 if len(predecessor.sequence) == 0:
                     bfb_distance = new_cost
-                    starts.append(predecessor)
+                    start_backward = predecessor
 
             if cost[predecessor] == new_cost:
-                G[predecessor][node] = operation
+                # Equal sources at different indices yield parallel edges;
+                # the first index is kept.
+                G[predecessor].setdefault(node, operation)
 
-    adjacency = _relabel_forward(G, starts) if starts else {start: {}}
-    return BFBGraph(adjacency, sources, target, bfb_distance)
+    return G, start_backward, bfb_distance
+
+
+def BFB_dist(sources, target):
+    """Infer every history over ``sources`` reaching ``target`` that is
+    minimum first in the number of t-BFB cycles and then in the total
+    number of cycles.
+
+    The returned :class:`~bfb_dist.bfb_graph.BFBGraph` contains only edges
+    between consecutive distance layers. Its distance is the number of
+    cycles, counting the t-BFB cycles, zero when the target is empty, and
+    ``math.inf`` when the target is unreachable. A source may be appended
+    any number of times. The search runs backward from the target and
+    deepens the bound on reversed t-BFB cycles from one upward; the first
+    bound reaching the empty sequence is the minimum number of t-BFB
+    cycles, and every history found under it uses exactly that many.
+    """
+    sources = validate_sources(sources)
+    start = start_state()
+    if len(target) == 0:
+        return BFBGraph({start: {}}, sources, target, 0)
+
+    for max_translocations in range(1, len(target) + 1):
+        G, start_backward, bfb_distance = _bounded_search(
+            sources, target, max_translocations
+        )
+        if start_backward is not None:
+            adjacency = _relabel_forward(
+                G, start_backward, start_backward.translocations
+            )
+            return BFBGraph(adjacency, sources, target, bfb_distance)
+    return BFBGraph({start: {}}, sources, target, math.inf)

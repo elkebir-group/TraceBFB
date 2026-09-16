@@ -38,7 +38,8 @@ class BFBGraphTests(unittest.TestCase):
         self.assertIs(graph.adjacency, adjacency)
         self.assertFalse(hasattr(graph, "bfb_distance"))
         self.assertEqual(graph.start, start_state())
-        self.assertEqual(graph.end, State(graph.target, 1))
+        self.assertEqual(graph.ends, {State(graph.target, 1)})
+        self.assertEqual(graph.translocation_count(), 1)
 
         cached = BFBGraph(adjacency, graph.sources, graph.target, 9)
         self.assertEqual(cached.calculate_bfb_distance(), 9)
@@ -55,7 +56,7 @@ class BFBGraphTests(unittest.TestCase):
 
         self.assertEqual(
             graph.get_paths(),
-            [[graph.start, appended, intermediate, graph.end]],
+            [[graph.start, appended, intermediate, State(graph.target, 1)]],
         )
         self.assertIs(graph.get_paths(), graph.paths)
 
@@ -92,7 +93,7 @@ class BFBGraphTests(unittest.TestCase):
                     State(graph.sources[0], 1): Operation.translocation(0)
                 },
                 State(graph.sources[0], 1): {
-                    State(graph.sources[0] + graph.sources[0], 0b11):
+                    State(graph.sources[0] + graph.sources[0], 2):
                         Operation.translocation(1)
                 },
             },
@@ -112,7 +113,8 @@ class BFBGraphTests(unittest.TestCase):
         self.assertEqual(loaded.sources, graph.sources)
         self.assertEqual(loaded.target, graph.target)
         self.assertEqual(loaded.adjacency, graph.adjacency)
-        self.assertNotIn(loaded.end, loaded.adjacency)
+        for end in loaded.ends:
+            self.assertNotIn(end, loaded.adjacency)
         self.assertEqual(loaded.calculate_bfb_distance(), 3)
 
     def test_text_round_trip_with_two_sources(self):
@@ -120,7 +122,7 @@ class BFBGraphTests(unittest.TestCase):
         sources = (first, second)
         start = start_state()
         one = State(first, 0b01)
-        both = State(first + second, 0b11)
+        both = State(first + second, 2)
         graph = BFBGraph(
             {
                 start: {one: Operation.translocation(0)},
@@ -147,7 +149,8 @@ class BFBGraphTests(unittest.TestCase):
 
         self.assertIn(f'"{graph.start}" -> "{appended}" [label="t"];', dot)
         self.assertIn(f'"{appended}" -> "{intermediate}" [label="i"];', dot)
-        self.assertIn(f'"{intermediate}" -> "{graph.end}" [label="f"];', dot)
+        end = State(graph.target, 1)
+        self.assertIn(f'"{intermediate}" -> "{end}" [label="f"];', dot)
 
     def test_zero_distance_graph(self):
         start = start_state()
@@ -172,7 +175,7 @@ class LoadedGraphValidationTests(unittest.TestCase):
         self.graph, self.appended, self.intermediate = linear_graph()
         self.source = self.graph.sources[0]
         self.start = self.graph.start
-        self.end = self.graph.end
+        self.end = State(self.graph.target, 1)
         self.header = f"{self.graph.target}\n{self.source}\n"
 
     def assert_invalid(self, text, message):

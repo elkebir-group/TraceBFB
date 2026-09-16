@@ -1,10 +1,11 @@
-"""Sources are appended at most once, and t-BFB cycles may keep the prefix."""
+"""Sources may be reused, histories minimize t-BFB cycles first, and t-BFB
+cycles may keep the matched prefix."""
 
 import math
 import random
 import unittest
 
-from bfb_dist.distance import BFB_dist
+from bfb_dist.distance import BFB_dist, _bounded_search
 from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist
 from bfb_dist.nbfb_fast import NBFB_fast_dist
 from bfb_dist.sequence import LetterAsSegment, Sequence
@@ -13,7 +14,7 @@ from tests.helpers import assert_valid_generated_graph, letters
 ALGORITHMS = (BFB_dist, NBFB_dist, NBFB_fast_dist, LCP_monotone_dist)
 
 
-class AtMostOnceTests(unittest.TestCase):
+class SourceReuseTests(unittest.TestCase):
     def assert_valid_generated_graph(self, graph, expected_distance):
         assert_valid_generated_graph(self, graph, expected_distance)
 
@@ -29,8 +30,7 @@ class AtMostOnceTests(unittest.TestCase):
             with self.subTest(algorithm=algorithm.__name__):
                 graph = algorithm(sources, target)
                 self.assert_valid_generated_graph(graph, 2)
-                for path in graph.get_paths():
-                    self.assertEqual(path[-1].used, 0b01)
+                self.assertEqual(graph.translocation_count(), 1)
 
     def test_unused_sources_do_not_change_distance(self):
         target = letters("ABbaAB")
@@ -55,16 +55,36 @@ class AtMostOnceTests(unittest.TestCase):
             with self.subTest(algorithm=algorithm.__name__):
                 graph = algorithm(sources, target)
                 self.assert_valid_generated_graph(graph, 5)
-                for path in graph.get_paths():
-                    self.assertEqual(path[-1].used, 0b1110)
+                self.assertEqual(graph.translocation_count(), 3)
 
-    def test_backward_search_relabels_each_unused_set(self):
-        # Two different unused sets reach the same distance.
-        sources = [letters("AB"), letters("A"), letters("B")]
-        target = letters("ABb")
+    def test_fewest_translocations_beat_shortest_length(self):
+        # The shortest history to A b a B A appends both sources (3 cycles),
+        # but a history with a single t-BFB exists (4 cycles) and wins.
+        sources = [letters("AB"), letters("BA")]
+        target = letters("AbaBA")
         graph = BFB_dist(sources, target)
-        self.assert_valid_generated_graph(graph, 2)
-        self.assertEqual({path[-1].used for path in graph.get_paths()}, {0b001})
+        self.assert_valid_generated_graph(graph, 4)
+        self.assertEqual(graph.translocation_count(), 1)
+        _, start_backward, shortest = _bounded_search(sources, target, len(target))
+        self.assertEqual((start_backward.translocations, shortest), (2, 3))
+
+    def test_source_may_be_reused(self):
+        # A tandem copy costs one t-BFB per copy; the target has no inverted
+        # segment, so no fold-back history exists.
+        sources, target = [letters("AB")], letters("ABAB")
+        for algorithm in ALGORITHMS:
+            with self.subTest(algorithm=algorithm.__name__):
+                graph = algorithm(sources, target)
+                self.assert_valid_generated_graph(graph, 2)
+                self.assertEqual(graph.translocation_count(), 2)
+
+    def test_listing_a_source_twice_changes_nothing(self):
+        sources = [letters("ABCD"), letters("X")]
+        target = letters("ABCDXcbBCDXcb")
+        once = BFB_dist(sources, target)
+        twice = BFB_dist(sources + sources, target)
+        self.assertEqual(once.calculate_bfb_distance(), twice.calculate_bfb_distance())
+        self.assertEqual(once.translocation_count(), twice.translocation_count())
 
 
 class RelaxedNestedTests(unittest.TestCase):
@@ -119,10 +139,12 @@ class RelaxedNestedTests(unittest.TestCase):
                 for _ in range(rng.randint(1, 3))
             ]
             with self.subTest(sources=sources, target=target):
-                slow = NBFB_dist(sources, target).calculate_bfb_distance()
-                fast = NBFB_fast_dist(sources, target).calculate_bfb_distance()
+                def label(graph):
+                    return (graph.translocation_count(), graph.calculate_bfb_distance())
+                slow = label(NBFB_dist(sources, target))
+                fast = label(NBFB_fast_dist(sources, target))
                 self.assertEqual(slow, fast)
-                general = BFB_dist(sources, target).calculate_bfb_distance()
+                general = label(BFB_dist(sources, target))
                 self.assertLessEqual(general, slow)
 
 

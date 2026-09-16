@@ -41,6 +41,4 @@ def assert_valid_generated_graph(testcase, graph, expected_distance):
             for node, child in zip(path, path[1:])
         ]
         testcase.assertEqual(kinds[0], "t")
-        used = bin(path[-1].used).count("1")
-        testcase.assertEqual(kinds.count("t"), used)
-        testcase.assertLessEqual(used, len(graph.sources))
+        testcase.assertEqual(kinds.count("t"), path[-1].translocations)
