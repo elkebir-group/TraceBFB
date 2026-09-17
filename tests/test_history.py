@@ -3,9 +3,6 @@ import unittest
 from bfb_dist.history import (
     Operation,
     State,
-    end_state,
-    full_mask,
-    mask_indices,
     start_state,
     validate_sources,
 )
@@ -54,18 +51,19 @@ class StateTests(unittest.TestCase):
         self.assertEqual(state, State(letters("ABba"), 0b01))
 
         state = state.apply(Operation.translocation(1), sources)
-        self.assertEqual(state, State(letters("ABbaC"), 0b11))
+        self.assertEqual(state, State(letters("ABbaC"), 2))
 
         state = state.apply(Operation("f", 3, 4, ), sources)
-        self.assertEqual(state, State(letters("ABbacA"), 0b11))
-        self.assertEqual(state, end_state(sources, letters("ABbacA")))
+        self.assertEqual(state, State(letters("ABbacA"), 2))
+
+        # A source may be appended again.
+        state = state.apply(Operation.translocation(0), sources)
+        self.assertEqual(state, State(letters("ABbacAAB"), 3))
 
     def test_apply_rejects_inapplicable_operations(self):
         sources = (letters("AB"),)
         state = State(letters("AB"), 0b1)
 
-        with self.assertRaisesRegex(ValueError, "already been appended"):
-            state.apply(Operation.translocation(0), sources)
         with self.assertRaisesRegex(ValueError, "out of range"):
             state.apply(Operation.translocation(1), sources)
         with self.assertRaisesRegex(ValueError, "empty R"):
@@ -76,12 +74,10 @@ class StateTests(unittest.TestCase):
             state.apply(Operation("i", 1, 1), sources)
 
     def test_string_round_trip(self):
-        state = State(letters("AB"), 0b101)
+        state = State(letters("AB"), 2)
 
-        self.assertEqual(str(state), "{0,2}A;B")
-        self.assertEqual(
-            State.from_string("{0,2}A;B", parse_letters), state
-        )
+        self.assertEqual(str(state), "{2}A;B")
+        self.assertEqual(State.from_string("{2}A;B", parse_letters), state)
         self.assertEqual(State.from_string("{}", parse_letters), start_state())
 
     def test_invalid_serialized_state(self):
@@ -90,12 +86,10 @@ class StateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     State.from_string(text, parse_letters)
 
-    def test_masks(self):
-        self.assertEqual(full_mask((1, 2, 3)), 0b111)
-        self.assertEqual(mask_indices(0b101), [0, 2])
-        self.assertEqual(mask_indices(0), [])
-        self.assertTrue(State(Sequence(), 0b10).has_used(1))
-        self.assertFalse(State(Sequence(), 0b10).has_used(0))
+    def test_translocation_count(self):
+        self.assertEqual(start_state().translocations, 0)
+        self.assertEqual(State(Sequence(), 2).translocations, 2)
+        self.assertEqual(str(State(Sequence(), 2)), "{2}")
 
     def test_validate_sources_rejects_empty_source(self):
         with self.assertRaisesRegex(ValueError, "source 1 is empty"):

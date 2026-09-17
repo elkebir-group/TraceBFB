@@ -2,13 +2,7 @@
 
 import math
 
-from bfb_dist.history import (
-    Operation,
-    State,
-    end_state,
-    start_state,
-    validate_sources,
-)
+from bfb_dist.history import Operation, State, start_state, validate_sources
 from bfb_dist.sequence import Sequence
 from bfb_dist.utils import format_operation_line
 
@@ -19,11 +13,11 @@ class BFBGraph:
     Nodes are :class:`~bfb_dist.history.State` objects. ``adjacency`` maps
     each non-end node to a mapping from child states to the
     :class:`~bfb_dist.history.Operation` producing them. Every history
-    starts at ``start`` (the empty sequence with no source appended) and
-    ends at an *end state*, a state whose sequence is the target. Sources
-    are appended at most once, so histories may end with different sets of
-    appended sources; ``end`` is the end state that appends every source.
-    The graph and its cached results must not be mutated.
+    starts at ``start`` (the empty sequence with no t-BFB cycle applied)
+    and ends at an *end state*, a state whose sequence is the target. All
+    histories of a valid graph apply the same number of t-BFB cycles and
+    the same total number of cycles. The graph and its cached results must
+    not be mutated.
     """
 
     def __init__(self, adjacency, sources, target, bfb_distance=None):
@@ -32,7 +26,6 @@ class BFBGraph:
         self.sources = validate_sources(sources)
         self.target = target
         self.start = start_state()
-        self.end = end_state(self.sources, target)
         if bfb_distance is not None:
             self.bfb_distance = bfb_distance
 
@@ -51,6 +44,15 @@ class BFBGraph:
             for child in children
             if self.is_end(child)
         }
+
+    def translocation_count(self):
+        """Return the number of t-BFB cycles of the histories in the graph.
+
+        Returns ``math.inf`` when no end state is reachable.
+        """
+        if math.isinf(self.calculate_bfb_distance()):
+            return math.inf
+        return next(iter(self.ends)).translocations
 
     def calculate_bfb_distance(self):
         """Calculate, cache, and return the length of a shortest history.

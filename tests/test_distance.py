@@ -18,7 +18,7 @@ class DistanceTests(unittest.TestCase):
 
         self.assert_valid_generated_graph(graph, 1)
         self.assertEqual(
-            graph.adjacency[graph.start][graph.end],
+            graph.adjacency[graph.start][State(graph.target, 1)],
             Operation.translocation(0),
         )
 
@@ -59,7 +59,7 @@ class DistanceTests(unittest.TestCase):
 
         self.assert_valid_generated_graph(graph, 2)
         self.assertEqual(
-            graph.adjacency[State(source, 1)][graph.end],
+            graph.adjacency[State(source, 1)][State(graph.target, 1)],
             Operation("p", 0, 2),
         )
 
@@ -71,7 +71,7 @@ class DistanceTests(unittest.TestCase):
                 graph = BFB_dist([source], target)
                 self.assert_valid_generated_graph(graph, 2)
                 self.assertEqual(
-                    graph.adjacency[State(source, 1)][graph.end],
+                    graph.adjacency[State(source, 1)][State(graph.target, 1)],
                     Operation(kind, 0, 1),
                 )
 
@@ -90,7 +90,7 @@ class DistanceTests(unittest.TestCase):
         self.assert_valid_generated_graph(graph, 2)
         self.assertEqual(
             graph.get_paths(),
-            [[graph.start, State(source, 1), graph.end]],
+            [[graph.start, State(source, 1), State(graph.target, 1)]],
         )
 
     def test_paper_examples_are_one_more_than_the_fold_back_count(self):
@@ -125,50 +125,50 @@ class DistanceTests(unittest.TestCase):
         graph = BFB_dist([letters("A"), letters("A")], letters("AaA"))
 
         self.assert_valid_generated_graph(graph, 3)
-        # Both orders of appending the two copies are minimum histories, and
-        # so is appending either copy alone followed by two p-BFB cycles
-        # (A -> A a -> A a A), as sources are appended at most once.
-        self.assertEqual(len(graph.get_paths()), 4)
-        self.assertEqual(
-            sorted(path[-1].used for path in graph.get_paths()),
-            [0b01, 0b10, 0b11, 0b11],
-        )
+        # Fewest t-BFB cycles first: one copy followed by two p-BFB cycles
+        # (A -> A a -> A a A) beats appending both copies. Equal sources
+        # are interchangeable, so the parallel t-BFB edges collapse to one
+        # path that appends the first copy.
+        self.assertEqual(graph.translocation_count(), 1)
+        self.assertEqual(len(graph.get_paths()), 1)
+        self.assertEqual(self._path_operations(graph)[0], Operation.translocation(0))
 
     def test_source_may_be_appended_after_fold_backs(self):
         graph = BFB_dist([letters("AB"), letters("C")], letters("ABCcbb"))
 
         self.assert_valid_generated_graph(graph, 4)
 
-    def test_relabeling_removes_unused_sources_and_stray_nodes(self):
-        # Backward labels carry the unused source 1 (``Z``) along the whole
-        # history; relabeling from the empty-sequence state drops it.
-        sources = (letters("AB"), letters("Z"))
-        start_backward = State(letters(""), 0b10)
-        source = State(letters("AB"), 0b11)
-        intermediate = source.apply(Operation("i", 0, 1), sources)
-        target = intermediate.apply(Operation("f", 1, 2), sources)
-        stray = State(letters("Z"), 0b11)
+    def test_relabeling_converts_reversed_counts_and_drops_stray_nodes(self):
+        # Backward labels count reversed t-BFB cycles: 0 at the target, 1 at
+        # the empty sequence. Relabeling turns them into forward counts.
+        sources = (letters("AB"),)
+        target = State(letters("ABbA"), 0)
+        intermediate = State(letters("ABb"), 0)
+        source = State(letters("AB"), 0)
+        start_backward = State(letters(""), 1)
+        stray = State(letters("Z"), 0)
         G = defaultdict(dict)
         G[start_backward][source] = Operation.translocation(0)
         G[source][intermediate] = Operation("i", 0, 1)
         G[intermediate][target] = Operation("f", 1, 2)
-        G[stray][State(letters("Zz"), 0b11)] = Operation("p", 0, 1)
+        G[stray][State(letters("Zz"), 0)] = Operation("p", 0, 1)
 
-        adjacency = _relabel_forward(G, [start_backward])
+        adjacency = _relabel_forward(G, start_backward, 1)
 
-        forward_source = State(letters("AB"), 0b01)
+        forward_source = State(letters("AB"), 1)
         self.assertEqual(
             set(adjacency),
-            {start_state(), forward_source, State(intermediate.sequence, 0b01)},
+            {start_state(), forward_source, State(letters("ABb"), 1)},
         )
         self.assertEqual(
             adjacency[start_state()],
             {forward_source: Operation.translocation(0)},
         )
+        self.assertEqual(
+            adjacency[State(letters("ABb"), 1)],
+            {State(letters("ABbA"), 1): Operation("f", 1, 2)},
+        )
         self.assertNotIn(stray, adjacency)
-        for children in adjacency.values():
-            for child in children:
-                self.assertEqual(child.used, 0b01)
 
     def _path_operations(self, graph):
         path = graph.get_paths()[0]

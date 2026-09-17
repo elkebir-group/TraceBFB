@@ -1,10 +1,10 @@
 """States and operations of BFB histories over a set of sources.
 
 A history starts from the empty string and applies p-, i-, f-, and t-BFB
-cycles. A t-BFB cycle appends one source from the input set, and every
-source is appended exactly once. A search state therefore pairs the current
-sequence with the set of sources appended so far, stored as a bitmask over
-source indices so that equal sources at different indices stay distinct.
+cycles. A t-BFB cycle appends one source from the input set; a source may be
+appended any number of times. A search state pairs the current sequence with
+the number of t-BFB cycles applied so far, which the searches minimize
+before the total number of cycles.
 """
 
 from dataclasses import dataclass
@@ -70,44 +70,22 @@ class Operation:
         raise ValueError(f"invalid operation {','.join(fields)!r}")
 
 
-def full_mask(sources):
-    """Return the bitmask with every source index set."""
-    return (1 << len(sources)) - 1
-
-
-def mask_indices(mask):
-    """Return the sorted source indices contained in ``mask``."""
-    indices = []
-    index = 0
-    while mask:
-        if mask & 1:
-            indices.append(index)
-        mask >>= 1
-        index += 1
-    return indices
-
-
 @dataclass(frozen=True)
 class State:
-    """A sequence together with the bitmask of sources appended so far."""
+    """A sequence together with the number of t-BFB cycles applied so far."""
 
     sequence: Sequence
-    used: int = 0
+    translocations: int = 0
 
     def __str__(self):
-        """Serialize as ``{i,j,...}`` followed by the sequence."""
-        indices = ",".join(map(str, mask_indices(self.used)))
-        return "{" + indices + "}" + str(self.sequence)
+        """Serialize as ``{c}`` followed by the sequence."""
+        return "{" + str(self.translocations) + "}" + str(self.sequence)
 
     __repr__ = __str__
 
     def __len__(self):
         """Return the number of segments of the sequence."""
         return len(self.sequence)
-
-    def has_used(self, index):
-        """Return whether source ``index`` has been appended."""
-        return bool(self.used >> index & 1)
 
     def apply(self, operation, sources):
         """Return the state produced by ``operation``.
@@ -122,11 +100,7 @@ class State:
                 raise ValueError(
                     f"source index {index} out of range"
                 )
-            if self.has_used(index):
-                raise ValueError(
-                    f"source {index} has already been appended"
-                )
-            return State(sequence + sources[index], self.used | 1 << index)
+            return State(sequence + sources[index], self.translocations + 1)
 
         x, y = operation.x, operation.y
         length = len(sequence)
@@ -145,7 +119,7 @@ class State:
             raise ValueError(f"unknown operation kind {operation.kind!r}")
         return State(
             sequence.bfb_target(x, y, operation.is_forward_deletion),
-            self.used,
+            self.translocations,
         )
 
     @classmethod
@@ -157,33 +131,25 @@ class State:
         """
         text = text.strip()
         if not text.startswith("{"):
-            raise ValueError(f"invalid state {text!r}: missing source set")
+            raise ValueError(f"invalid state {text!r}: missing t-BFB count")
         close = text.find("}")
         if close < 0:
-            raise ValueError(f"invalid state {text!r}: unterminated source set")
-        used = 0
-        indices_text = text[1:close]
-        if indices_text:
-            for index_text in indices_text.split(","):
-                index = int(index_text)
-                if index < 0:
-                    raise ValueError(f"invalid state {text!r}: negative index")
-                if used >> index & 1:
-                    raise ValueError(
-                        f"invalid state {text!r}: repeated source index"
-                    )
-                used |= 1 << index
-        return cls(parse_sequence(text[close + 1:]), used)
+            raise ValueError(f"invalid state {text!r}: unterminated t-BFB count")
+        count_text = text[1:close]
+        try:
+            translocations = int(count_text) if count_text else 0
+        except ValueError as error:
+            raise ValueError(
+                f"invalid state {text!r}: t-BFB count is not an integer"
+            ) from error
+        if translocations < 0:
+            raise ValueError(f"invalid state {text!r}: negative t-BFB count")
+        return cls(parse_sequence(text[close + 1:]), translocations)
 
 
 def start_state():
     """Return the state every history starts from."""
     return State(Sequence(), 0)
-
-
-def end_state(sources, target):
-    """Return the state every history reaching ``target`` ends in."""
-    return State(target, full_mask(sources))
 
 
 def validate_sources(sources):
@@ -198,7 +164,3 @@ def validate_sources(sources):
             raise ValueError(f"source {index} is empty")
     return sources
 
-
-def total_source_length(sources):
-    """Return the summed length of the sources."""
-    return sum(len(source) for source in sources)

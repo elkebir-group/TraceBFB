@@ -4,7 +4,7 @@ import unittest
 
 from bfb_dist.distance import BFB_dist
 from bfb_dist.history import start_state
-from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist
+from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist, _bounded_search
 from bfb_dist.nbfb_fast import NBFB_fast_dist
 from bfb_dist.simulation import _set_seed, simulate_history
 from tests.helpers import assert_valid_generated_graph, letters
@@ -71,14 +71,22 @@ class NbfbTests(unittest.TestCase):
         )
 
     def test_prefix_separation_example(self):
+        # With the source appended once, LCP-monotone histories reach the
+        # target in 5 cycles and nested ones never do (paper). As the target
+        # ends with the source, appending the source a second time gives a
+        # nested history of 5 cycles, which the lexicographic optimum takes.
         sources, target = [letters("AAB")], letters("AABbAbAAB")
         self.assertTrue(sources[0].is_prefix_of(target))
 
-        self.assert_valid_generated_graph(LCP_monotone_dist(sources, target), 5)
-        self.assert_valid_generated_graph(NBFB_dist(sources, target), math.inf)
-        self.assert_valid_generated_graph(
-            NBFB_fast_dist(sources, target), math.inf
-        )
+        monotone = LCP_monotone_dist(sources, target)
+        self.assert_valid_generated_graph(monotone, 5)
+        self.assertEqual(monotone.translocation_count(), 1)
+        for algorithm in (NBFB_dist, NBFB_fast_dist):
+            graph = algorithm(sources, target)
+            self.assert_valid_generated_graph(graph, 5)
+            self.assertEqual(graph.translocation_count(), 2)
+        _, _, ends, _ = _bounded_search(sources, target, True, 1)
+        self.assertEqual(ends, [])
 
     def test_translocation_after_fold_backs(self):
         sources, target = [letters("AB"), letters("C")], letters("ABbC")
@@ -100,9 +108,11 @@ class NbfbTests(unittest.TestCase):
 
     def test_fast_agrees_with_search_on_short_deletion_histories(self):
         # Histories whose f-BFB overhangs are shorter than the preceding
-        # cycle's gain are nested (paper, Short deletions), so NBFB is at
-        # most the simulated length; NBFB_fast must agree with NBFB and
-        # BFB can only be smaller.
+        # cycle's gain are nested (paper, Short deletions). The simulated
+        # history appends every source once, so the optimum, which minimizes
+        # t-BFB cycles first and total cycles second, is at most
+        # (n_sources, cycles) in that order; NBFB_fast must agree with NBFB
+        # and BFB can only be smaller.
         rng = random.Random(3)
         checked = 0
         for trial in range(120):
@@ -119,11 +129,17 @@ class NbfbTests(unittest.TestCase):
                 continue
             checked += 1
             with self.subTest(sources=sources, target=target, cycles=cycles):
-                nested = distance(NBFB_dist, sources, target)
-                fast = distance(NBFB_fast_dist, sources, target)
-                general = distance(BFB_dist, sources, target)
+                def label(algorithm):
+                    graph = algorithm(sources, target)
+                    return (
+                        graph.translocation_count(),
+                        graph.calculate_bfb_distance(),
+                    )
+                nested = label(NBFB_dist)
+                fast = label(NBFB_fast_dist)
+                general = label(BFB_dist)
                 self.assertEqual(nested, fast)
-                self.assertLessEqual(nested, cycles)
+                self.assertLessEqual(nested, (n_sources, cycles))
                 self.assertLessEqual(general, nested)
         self.assertGreater(checked, 50)
 

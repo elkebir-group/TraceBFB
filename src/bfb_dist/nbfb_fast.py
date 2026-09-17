@@ -16,21 +16,18 @@ every tuple is visited once in amortized O(1) time. All indices in this
 module are 1-based to mirror the paper; ``Sequence`` slicing converts at the
 boundary.
 
-The search records a parent pointer per tuple, so it returns one shortest
-history rather than every shortest history. Use ``NBFB_dist`` for the
-complete minimum-path graph.
+Keys pair a t-BFB count with a tuple; the driver deepens the bound on that
+count so the returned history is minimum first in t-BFB cycles and then in
+total cycles. The search records a parent pointer per tuple, so it returns
+one such history rather than every one. Use ``NBFB_dist`` for the complete
+minimum-path graph.
 """
 
 from collections import deque
 import math
 
 from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.history import (
-    Operation,
-    State,
-    start_state,
-    validate_sources,
-)
+from bfb_dist.history import Operation, State, start_state, validate_sources
 
 
 def _lce_table(y, z):
@@ -85,11 +82,18 @@ class _NextUnvisited:
 
 
 class _FastSearch:
-    """Breadth-first search over index tuples for one instance."""
+    """Breadth-first search over index tuples for one instance.
 
-    def __init__(self, sources, target):
+    Every key pairs the number of t-BFB cycles applied so far with an index
+    tuple; ``max_translocations`` bounds that number.
+    """
+
+    def __init__(self, sources, target, max_translocations=None):
         self.sources = sources
         self.target = target
+        self.max_translocations = (
+            len(target) if max_translocations is None else max_translocations
+        )
         self.n = n = len(target)
         self.m = len(sources)
         t = target.segments
@@ -244,8 +248,8 @@ class _FastSearch:
         lce_bt = self.lce_bt
 
         for index in range(self.m):
-            if mask >> index & 1:
-                continue
+            if mask >= self.max_translocations:
+                break
             length = self.source_len[index]
             j = min(length, self.lce_xt[index][1][phi + 1])
             if j >= 1:
@@ -256,9 +260,7 @@ class _FastSearch:
                 node = ("W", phi, p, p + length - 1)
             else:
                 continue
-            self.visit(
-                mask | 1 << index, node, key, Operation.translocation(index)
-            )
+            self.visit(mask + 1, node, key, Operation.translocation(index))
 
         for beta in range(phi):
             # p-BFB: q = t[beta+1..phi].
@@ -371,8 +373,8 @@ class _FastSearch:
         # u is admitted when ybar ubar occurs in t, and the successor is the
         # window node whose window spells ybar ubar.
         for y in range(self.m):
-            if mask >> y & 1:
-                continue
+            if mask >= self.max_translocations:
+                break
             ly = self.source_len[y]
             if node[0] == "W":
                 L, p = self.ext_w[y][a]
@@ -380,7 +382,7 @@ class _FastSearch:
                 L, p = self.ext_t[y][index]
             if L >= lam:
                 self.visit(
-                    mask | 1 << y,
+                    mask + 1,
                     ("W", phi, p, p + ly + lam - 1),
                     key,
                     Operation.translocation(y),
@@ -451,8 +453,15 @@ def NBFB_fast_dist(sources, target):
     if len(target) == 0:
         return BFBGraph({start: {}}, sources, target, 0)
 
-    search = _FastSearch(sources, target)
-    goal = search.run()
+    # Deepen the bound on t-BFB cycles from one upward: the first bound
+    # reaching the target is the minimum number of t-BFB cycles, and the
+    # breadth-first search under that bound minimizes the total number.
+    goal = None
+    for max_translocations in range(1, len(target) + 1):
+        search = _FastSearch(sources, target, max_translocations)
+        goal = search.run()
+        if goal is not None:
+            break
     if goal is None:
         return BFBGraph({start: {}}, sources, target, math.inf)
 

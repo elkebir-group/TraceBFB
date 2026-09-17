@@ -58,7 +58,7 @@ def _truncate_G(G, start, ends):
     return adjacency or {start: {}}
 
 
-def _successors(node, sources, target, foldable):
+def _successors(node, sources, target, foldable, max_translocations):
     """Yield ``(child, operation)`` pairs of one BFB cycle.
 
     Children of p-, i-, and f-BFB cycles must strictly extend the matched
@@ -67,7 +67,8 @@ def _successors(node, sources, target, foldable):
     the prefix is exempt from foldability, as the appended source is given
     rather than produced by a fold-back, whereas a child that keeps the
     prefix must have a foldable tail when ``foldable`` is true. Children
-    longer than the target are discarded, as no cycle shortens a sequence.
+    longer than the target are discarded, as no cycle shortens a sequence,
+    and so are t-BFB children beyond ``max_translocations`` cycles.
     """
     sequence = node.sequence
     phi = sequence.lcp_length(target)
@@ -81,27 +82,30 @@ def _successors(node, sources, target, foldable):
         operation = Operation.fold_back(
             x, y, is_forward_deletion, len(sequence)
         )
-        yield State(child, node.used), operation
+        yield State(child, node.translocations), operation
 
+    if node.translocations >= max_translocations:
+        return
     for index, source in enumerate(sources):
-        if node.has_used(index):
-            continue
         child = sequence + source
         if len(child) > n:
             continue
         if child.lcp_length(target) <= phi and foldable:
             if not _is_foldable(child, target):
                 continue
-        yield State(child, node.used | 1 << index), Operation.translocation(index)
+        yield (
+            State(child, node.translocations + 1),
+            Operation.translocation(index),
+        )
 
 
-def _search(sources, target, foldable):
-    """Infer every minimum-length history in the selected class."""
-    sources = validate_sources(sources)
+def _bounded_search(sources, target, foldable, max_translocations):
+    """Breadth-first search with at most ``max_translocations`` t-BFB cycles.
+
+    Returns the layered adjacency, the start state, the end states of the
+    first layer reaching the target, and that layer's index.
+    """
     start = start_state()
-    if len(target) == 0:
-        return BFBGraph({start: {}}, sources, target, 0)
-
     pending = deque([start])
     G = defaultdict(dict)
     cost = {start: 0}
@@ -114,7 +118,9 @@ def _search(sources, target, foldable):
             break
 
         new_cost = cost[node] + 1
-        for child, operation in _successors(node, sources, target, foldable):
+        for child, operation in _successors(
+            node, sources, target, foldable, max_translocations
+        ):
             if child not in cost:
                 cost[child] = new_cost
                 pending.append(child)
@@ -123,10 +129,36 @@ def _search(sources, target, foldable):
                     ends.append(child)
 
             if cost[child] == new_cost:
-                G[node][child] = operation
+                # Equal sources at different indices yield parallel edges;
+                # the first index is kept.
+                G[node].setdefault(child, operation)
 
-    adjacency = _truncate_G(G, start, ends)
-    return BFBGraph(adjacency, sources, target, bfb_distance)
+    return G, start, ends, bfb_distance
+
+
+def _search(sources, target, foldable):
+    """Infer every history in the selected class that is minimum first in
+    the number of t-BFB cycles and then in the total number of cycles.
+
+    The search deepens the bound on t-BFB cycles from one upward; the
+    first bound admitting a history is the minimum number of t-BFB cycles,
+    and every history found under that bound uses exactly that many.
+    Every t-BFB cycle appends a nonempty source, so no history reaching the
+    target has more t-BFB cycles than the target has segments.
+    """
+    sources = validate_sources(sources)
+    start = start_state()
+    if len(target) == 0:
+        return BFBGraph({start: {}}, sources, target, 0)
+
+    for max_translocations in range(1, len(target) + 1):
+        G, start, ends, bfb_distance = _bounded_search(
+            sources, target, foldable, max_translocations
+        )
+        if ends:
+            adjacency = _truncate_G(G, start, ends)
+            return BFBGraph(adjacency, sources, target, bfb_distance)
+    return BFBGraph({start: {}}, sources, target, math.inf)
 
 
 def NBFB_dist(sources, target):
