@@ -129,8 +129,15 @@ class _FastSearch:
             self.xbar_pos.append(
                 [p for p in range(1, n - length + 2) if table[p][1] >= length]
             )
-        self.ext_w = []
-        for y in range(self.m):
+        # Only a source y whose reverse complement occurs in t can be appended
+        # while keeping the matched prefix, so the rows of every other source
+        # stay zero and ``expand_tail`` skips those sources.
+        self.foldable_sources = [y for y in range(self.m) if self.xbar_pos[y]]
+        zero_w = [(0, 0)] * (n + 2)
+        zero_t = [(0, 0)] * self.m
+        self.ext_w = [zero_w] * self.m
+        self.ext_t = [zero_t] * self.m
+        for y in self.foldable_sources:
             ly = self.source_len[y]
             row = [(0, 0)] * (n + 2)
             for a in range(1, n + 1):
@@ -140,18 +147,48 @@ class _FastSearch:
                     if value > best[0]:
                         best = (value, p)
                 row[a] = best
-            self.ext_w.append(row)
-        self.ext_t = [[(0, 0)] * self.m for _ in range(self.m)]
-        for y in range(self.m):
-            ly = self.source_len[y]
+            self.ext_w[y] = row
+            row = [(0, 0)] * self.m
             for x in range(self.m):
                 best = (0, 0)
                 for p in self.xbar_pos[y]:
                     value = self.lce_txbar[x][p + ly][1]
                     if value > best[0]:
                         best = (value, p)
-                self.ext_t[y][x] = best
+                row[x] = best
+            self.ext_t[y] = row
 
+        # For every window start a (resp. source x), the sources y that can be
+        # appended while keeping the matched prefix, by decreasing extension
+        # length, so that ``expand_tail`` stops at the first too-short one.
+        self.keep_w = [[] for _ in range(n + 2)]
+        for a in range(1, n + 1):
+            entries = [
+                (self.ext_w[y][a][0], self.ext_w[y][a][1], y)
+                for y in self.foldable_sources
+                if self.ext_w[y][a][0] >= 1
+            ]
+            entries.sort(key=lambda entry: -entry[0])
+            self.keep_w[a] = entries
+        self.keep_t = []
+        for x in range(self.m):
+            entries = [
+                (self.ext_t[y][x][0], self.ext_t[y][x][1], y)
+                for y in self.foldable_sources
+                if self.ext_t[y][x][0] >= 1
+            ]
+            entries.sort(key=lambda entry: -entry[0])
+            self.keep_t.append(entries)
+
+        self.reset(self.max_translocations)
+
+    def reset(self, max_translocations):
+        """Clear the search state and set the bound on t-BFB cycles.
+
+        The tables depend on the instance only, so the driver builds them once
+        and resets the search for every bound.
+        """
+        self.max_translocations = max_translocations
         self.dist = {}
         self.parent = {}
         self.e_family = {}
@@ -372,18 +409,14 @@ class _FastSearch:
         # t-BFB cycles that keep the matched prefix: appending y to the tail
         # u is admitted when ybar ubar occurs in t, and the successor is the
         # window node whose window spells ybar ubar.
-        for y in range(self.m):
-            if mask >= self.max_translocations:
-                break
-            ly = self.source_len[y]
-            if node[0] == "W":
-                L, p = self.ext_w[y][a]
-            else:
-                L, p = self.ext_t[y][index]
-            if L >= lam:
+        if mask < self.max_translocations:
+            entries = self.keep_w[a] if node[0] == "W" else self.keep_t[index]
+            for L, p, y in entries:
+                if L < lam:
+                    break
                 self.visit(
                     mask + 1,
-                    ("W", phi, p, p + ly + lam - 1),
+                    ("W", phi, p, p + self.source_len[y] + lam - 1),
                     key,
                     Operation.translocation(y),
                 )
@@ -457,8 +490,9 @@ def NBFB_fast_dist(sources, target):
     # reaching the target is the minimum number of t-BFB cycles, and the
     # breadth-first search under that bound minimizes the total number.
     goal = None
+    search = _FastSearch(sources, target)
     for max_translocations in range(1, len(target) + 1):
-        search = _FastSearch(sources, target, max_translocations)
+        search.reset(max_translocations)
         goal = search.run()
         if goal is not None:
             break
