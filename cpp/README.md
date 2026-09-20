@@ -76,6 +76,31 @@ always written in input order. A target that exhausts the memory budget or
 overflows the index limits is reported as an `error` row and the run continues;
 the exit status is then 1.
 
+### The fold-back-first objective (experimental, off by default)
+
+```
+nbfb -i INSTANCE.txt --foldback-first [--foldback-span BP|any]     # either mode
+```
+
+A t-BFB cycle appending a source that starts with segment `v` to a sequence
+ending with segment `u` creates the join `u -> v`. The join is *fold-back-shaped*
+when both segments lie on the same chromosome in opposite orientations with their
+breakpoints at most `--foldback-span` bp apart (default 50,000, the fold-back
+definition of the CASTLE screen); `any` drops the distance test. With
+`--foldback-first` the distance is minimum first in the number of t-BFB cycles
+that create such a join, then in t-BFB cycles, then in the total number of
+cycles, so that a fold-back junction is made by a fold rather than by an append.
+
+The flag adds a `foldback_t` line in single-instance mode and a `foldback_t`
+column in batch mode, and such cycles print as `T` in `types`. Without the flag
+nothing changes, in format or in value.
+
+Implementation: the search state packs the two counts as `f * (n + 1) + t`, and
+the driver deepens the bound on `f` first and on `t` second. Deciding that no
+history exists with at most `f` such joins is a reachability question only, so
+those runs drop the t-count from the state (one layer per `f` instead of `n`),
+which is what keeps the flag about as fast as the default.
+
 ### Library
 
 ```cpp

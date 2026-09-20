@@ -35,13 +35,32 @@ struct Operation {
     int x = -1;
     int y = -1;
     int source = -1;
+    bool foldback = false;  // t-BFB cycle whose join is fold-back-shaped
 };
 
 struct Result {
     bool reachable = false;  // false means the distance is infinite
+    int foldback_t = 0;      // t-BFB cycles creating a fold-back-shaped join
     int t_cycles = 0;        // number of t-BFB cycles of the optimum
     int total = 0;           // total number of cycles of the optimum
     std::vector<Operation> history;  // filled only when requested
+};
+
+// Experimental objective (off unless a JoinTable is passed). A t-BFB cycle
+// appending a source that starts with segment v to a sequence that ends
+// with segment u creates the join u -> v; is_foldback(u, v) says whether
+// that join is fold-back-shaped. With a table, the distance is minimum
+// first in the number of t-BFB cycles creating such a join, then in t-BFB
+// cycles, then in the total number of cycles.
+struct JoinTable {
+    int max_id = 0;                      // identifiers lie in -max_id..max_id
+    std::vector<std::uint8_t> foldback;  // (2 max_id + 1)^2 flags
+
+    bool is_foldback(int u, int v) const {
+        const std::size_t width = 2 * static_cast<std::size_t>(max_id) + 1;
+        return foldback[static_cast<std::size_t>(u + max_id) * width +
+                        static_cast<std::size_t>(v + max_id)] != 0;
+    }
 };
 
 class MemoryLimitExceeded : public std::runtime_error {
@@ -89,7 +108,8 @@ struct PreparedSources {
 Result nbfb_fast_dist(const PreparedSources& sources,
                       const std::vector<int>& target,
                       bool want_history,
-                      MemoryBudget& budget);
+                      MemoryBudget& budget,
+                      const JoinTable* foldback_first = nullptr);
 
 // Convenience overload with an unbounded budget.
 Result nbfb_fast_dist(const std::vector<std::vector<int>>& sources,

@@ -185,7 +185,7 @@ struct Record {
     i32 b;    // W: window end
     i32 op_x;
     i32 op_y;
-    std::uint16_t mask;  // number of t-BFB cycles applied so far
+    std::uint16_t mask;  // state: foldback_t * (n + 1) + t-BFB cycles so far
     std::uint8_t kind;
     char op_kind;
 };
@@ -205,7 +205,7 @@ struct Layer {
 class Search {
   public:
     Search(const PreparedSources& sources, const std::vector<int>& target,
-           MemoryBudget& budget);
+           MemoryBudget& budget, const JoinTable* joins = nullptr);
     ~Search();
 
     Result solve(bool want_history);
@@ -237,8 +237,25 @@ class Search {
     std::uint8_t* t_seen(Layer& target_layer);
 
     // -- search --------------------------------------------------------
-    void reset(int max_translocations);
+    void reset(int max_translocations, int max_foldback = 0, bool count_t = true);
     long long run();
+
+    // The search state packs the number f of t-BFB cycles that created a
+    // fold-back-shaped join and the number t of t-BFB cycles as
+    // f * (n + 1) + t; without a JoinTable f stays 0 and the state is t.
+    int t_of(int state) const { return state % state_stride_; }
+    int f_of(int state) const { return state / state_stride_; }
+    bool may_append(int state) const {
+        return t_of(state) < max_translocations_;
+    }
+    // State after a t-BFB cycle appending a source that starts with v to a
+    // sequence ending with u (u = 0 for the empty sequence), or -1 when the
+    // bound on fold-back-shaped joins forbids it.
+    int after_t(int state, int u, int v) const {
+        const int fb = (joins_ != nullptr && u != 0 && joins_->is_foldback(u, v)) ? 1 : 0;
+        if (f_of(state) + fb > max_foldback_) return -1;
+        return state + (count_t_ ? 1 : 0) + fb * state_stride_;
+    }
     void push(std::uint8_t kind, int mask, i32 phi, i32 a, i32 b, u32 parent,
               char op_kind, i32 op_x, i32 op_y);
     void visit_E(int mask, i32 phi, u32 parent, char op_kind, i32 op_x,
@@ -295,15 +312,24 @@ class Search {
     std::size_t record_bytes_ = 0;
     std::vector<Layer> layers_;
     int max_translocations_ = 0;
+    const JoinTable* joins_ = nullptr;
+    int max_foldback_ = 0;
+    // false only in the feasibility runs of the fold-back-first objective: t-BFB
+    // cycles are then not counted, so a state is (f, tuple) and reachability with at
+    // most f fold-back-shaped t-joins is decided in one layer per f
+    bool count_t_ = true;
+    int state_stride_ = 1;
 };
 
 Search::Search(const PreparedSources& sources, const std::vector<int>& target,
-               MemoryBudget& budget)
+               MemoryBudget& budget, const JoinTable* joins)
     : sources_(&sources),
       budget_(&budget),
       occ_map_(budget),
-      minb_map_(budget) {
+      minb_map_(budget),
+      joins_(joins) {
     n_ = static_cast<i32>(target.size());
+    state_stride_ = static_cast<int>(n_) + 1;
     m_ = static_cast<int>(sources.forward.size());
     if (n_ > MAX_INDEX || m_ > MAX_INDEX) {
         throw std::invalid_argument(
@@ -627,8 +653,10 @@ std::uint8_t* Search::t_seen(Layer& target_layer) {
 
 // ---------------------------------------------------------------- search
 
-void Search::reset(int max_translocations) {
+void Search::reset(int max_translocations, int max_foldback, bool count_t) {
     max_translocations_ = max_translocations;
+    max_foldback_ = max_foldback;
+    count_t_ = count_t;
     for (Layer& item : layers_) budget_->release(item.bytes);
     layers_.clear();
     layers_.shrink_to_fit();
@@ -699,22 +727,25 @@ void Search::visit_T(int mask, i32 phi0, i32 index, u32 parent, char op_kind,
 }
 
 void Search::expand_empty(int mask, i32 phi, u32 key) {
-    if (mask < max_translocations_) {
+    if (may_append(mask)) {
+        const int last = phi >= 1 ? t_[phi - 1] : 0;
         for (int index = 0; index < m_; ++index) {
+            const int next = after_t(mask, last, sources_->forward[index][0]);
+            if (next < 0) continue;
             const i32 length = src_len_[index];
             const i32 lce =
                 lce_xt1_[static_cast<std::size_t>(index) * stride_n_ + phi + 1];
             const i32 j = std::min(length, lce);
             if (j >= 1) {
                 if (j == length) {
-                    visit_E(mask + 1, phi + length, key, 't', index, -1);
+                    visit_E(next, phi + length, key, 't', index, -1);
                 } else {
-                    visit_T(mask + 1, phi, index, key, 't', index, -1);
+                    visit_T(next, phi, index, key, 't', index, -1);
                 }
             } else if (xbar_off_[index + 1] > xbar_off_[index]) {
                 // The prefix is kept; the tail x is foldable as xbar occurs.
                 const i32 p = xbar_pos_[xbar_off_[index]];
-                visit_W(mask + 1, phi, p, p + length - 1, key, 't', index, -1);
+                visit_W(next, phi, p, p + length - 1, key, 't', index, -1);
             }
         }
     }
@@ -874,7 +905,12 @@ void Search::expand_tail(const Record& record, u32 key) {
     // t-BFB cycles that keep the matched prefix: appending y to the tail u
     // is admitted when ybar ubar occurs in t, and the successor is the
     // window node whose window spells ybar ubar.
-    if (mask < max_translocations_) {
+    if (may_append(mask)) {
+        // Last segment of the tail: a window spells the reverse complement
+        // of the tail, and a source node's tail is a suffix of its source.
+        const int tail_last = record.kind == KIND_W
+                                  ? -t_[a - 1]
+                                  : sources_->forward[index].back();
         const Entry* first;
         const Entry* last;
         if (record.kind == KIND_W) {
@@ -888,7 +924,10 @@ void Search::expand_tail(const Record& record, u32 key) {
         }
         for (const Entry* entry = first; entry != last; ++entry) {
             if (entry->length < lambda) break;
-            visit_W(mask + 1, phi, entry->pos,
+            const int next =
+                after_t(mask, tail_last, sources_->forward[entry->source][0]);
+            if (next < 0) continue;
+            visit_W(next, phi, entry->pos,
                     entry->pos + src_len_[entry->source] + lambda - 1, key, 't',
                     entry->source, -1);
         }
@@ -918,10 +957,29 @@ long long Search::run() {
 
 Result Search::solve(bool want_history) {
     long long goal = -1;
-    for (int bound = 1; bound <= n_; ++bound) {
-        reset(bound);
-        goal = run();
-        if (goal >= 0) break;
+    if (joins_ == nullptr) {
+        for (int bound = 1; bound <= n_; ++bound) {
+            reset(bound);
+            goal = run();
+            if (goal >= 0) break;
+        }
+    } else {
+        // Deepen the bound on fold-back-shaped t-BFB joins; for the first
+        // feasible bound, deepen the bound on t-BFB cycles.
+        const int cap = std::min<int>(n_, 65535 / state_stride_ - 1);
+        for (int fb = 0; fb <= cap && goal < 0; ++fb) {
+            reset(n_, fb, false);  // is the target reachable with at most fb such joins?
+            if (run() < 0) continue;
+            for (int bound = 1; bound <= n_; ++bound) {
+                reset(bound, fb);
+                goal = run();
+                if (goal >= 0) break;
+            }
+        }
+        if (goal < 0 && cap < n_) {
+            throw std::invalid_argument(
+                "target too long for the fold-back-first objective");
+        }
     }
     Result result;
     if (goal < 0) {
@@ -930,7 +988,8 @@ Result Search::solve(bool want_history) {
     }
     const Record& end = records_[static_cast<std::size_t>(goal)];
     result.reachable = true;
-    result.t_cycles = end.mask;
+    result.t_cycles = t_of(end.mask);
+    result.foldback_t = f_of(end.mask);
     result.total = static_cast<int>(end.dist);
     if (want_history) {
         u32 node = static_cast<u32>(goal);
@@ -940,6 +999,8 @@ Result Search::solve(bool want_history) {
             operation.kind = current.op_kind;
             if (current.op_kind == 't') {
                 operation.source = current.op_x;
+                operation.foldback =
+                    f_of(current.mask) > f_of(records_[current.parent].mask);
             } else {
                 operation.x = current.op_x;
                 operation.y = current.op_y;
@@ -956,7 +1017,7 @@ Result Search::solve(bool want_history) {
 
 Result nbfb_fast_dist(const PreparedSources& sources,
                       const std::vector<int>& target, bool want_history,
-                      MemoryBudget& budget) {
+                      MemoryBudget& budget, const JoinTable* foldback_first) {
     for (std::size_t index = 0; index < sources.forward.size(); ++index) {
         if (sources.forward[index].empty()) {
             throw std::invalid_argument("source " + std::to_string(index) +
@@ -970,7 +1031,7 @@ Result nbfb_fast_dist(const PreparedSources& sources,
         result.total = 0;
         return result;
     }
-    Search search(sources, target, budget);
+    Search search(sources, target, budget, foldback_first);
     return search.solve(want_history);
 }
 
