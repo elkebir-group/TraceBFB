@@ -239,6 +239,7 @@ class Search {
     // -- search --------------------------------------------------------
     void reset(int max_translocations, int max_foldback = 0, bool count_t = true);
     long long run();
+    std::vector<Operation> history_of(long long goal) const;
 
     // The search state packs the number f of t-BFB cycles that created a
     // fold-back-shaped join and the number t of t-BFB cycles as
@@ -955,8 +956,31 @@ long long Search::run() {
     return -1;
 }
 
+std::vector<Operation> Search::history_of(long long goal) const {
+    std::vector<Operation> history;
+    u32 node = static_cast<u32>(goal);
+    while (records_[node].parent != NO_PARENT) {
+        const Record& current = records_[node];
+        Operation operation;
+        operation.kind = current.op_kind;
+        if (current.op_kind == 't') {
+            operation.source = current.op_x;
+            operation.foldback =
+                f_of(current.mask) > f_of(records_[current.parent].mask);
+        } else {
+            operation.x = current.op_x;
+            operation.y = current.op_y;
+        }
+        history.push_back(operation);
+        node = current.parent;
+    }
+    std::reverse(history.begin(), history.end());
+    return history;
+}
+
 Result Search::solve(bool want_history) {
     long long goal = -1;
+    Result result;
     if (joins_ == nullptr) {
         for (int bound = 1; bound <= n_; ++bound) {
             reset(bound);
@@ -969,19 +993,42 @@ Result Search::solve(bool want_history) {
         const int cap = std::min<int>(n_, 65535 / state_stride_ - 1);
         for (int fb = 0; fb <= cap && goal < 0; ++fb) {
             reset(n_, fb, false);  // is the target reachable with at most fb such joins?
-            if (run() < 0) continue;
+            const long long any = run();
+            if (any < 0) continue;
+            // With the t-BFB count unbounded, run() is a breadth-first
+            // search, so this is the shortest history with at most fb
+            // fold-back-shaped joins.
+            const int shortest = static_cast<int>(records_[any].dist);
+            result.fb_total = shortest;
+            result.fb_total_t = -1;
             for (int bound = 1; bound <= n_; ++bound) {
                 reset(bound, fb);
-                goal = run();
-                if (goal >= 0) break;
+                const long long found = run();
+                if (found < 0) continue;
+                if (goal < 0) {
+                    goal = found;
+                    result.t_cycles = t_of(records_[goal].mask);
+                    result.foldback_t = f_of(records_[goal].mask);
+                    result.total = static_cast<int>(records_[goal].dist);
+                    if (want_history) result.history = history_of(goal);
+                }
+                // The fewest t-BFB cycles among the shortest histories.
+                if (static_cast<int>(records_[found].dist) == shortest) {
+                    result.fb_total_t = t_of(records_[found].mask);
+                    if (want_history) result.fb_total_history = history_of(found);
+                    break;
+                }
             }
         }
         if (goal < 0 && cap < n_) {
             throw std::invalid_argument(
                 "target too long for the fold-back-first objective");
         }
+        if (goal >= 0) {
+            result.reachable = true;
+            return result;
+        }
     }
-    Result result;
     if (goal < 0) {
         result.reachable = false;
         return result;
@@ -991,25 +1038,7 @@ Result Search::solve(bool want_history) {
     result.t_cycles = t_of(end.mask);
     result.foldback_t = f_of(end.mask);
     result.total = static_cast<int>(end.dist);
-    if (want_history) {
-        u32 node = static_cast<u32>(goal);
-        while (records_[node].parent != NO_PARENT) {
-            const Record& current = records_[node];
-            Operation operation;
-            operation.kind = current.op_kind;
-            if (current.op_kind == 't') {
-                operation.source = current.op_x;
-                operation.foldback =
-                    f_of(current.mask) > f_of(records_[current.parent].mask);
-            } else {
-                operation.x = current.op_x;
-                operation.y = current.op_y;
-            }
-            result.history.push_back(operation);
-            node = current.parent;
-        }
-        std::reverse(result.history.begin(), result.history.end());
-    }
+    if (want_history) result.history = history_of(goal);
     return result;
 }
 

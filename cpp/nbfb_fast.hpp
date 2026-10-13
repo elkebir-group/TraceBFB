@@ -44,6 +44,15 @@ struct Result {
     int t_cycles = 0;        // number of t-BFB cycles of the optimum
     int total = 0;           // total number of cycles of the optimum
     std::vector<Operation> history;  // filled only when requested
+
+    // Objective (fold-back-shaped t-BFB cycles, total cycles, t-BFB cycles):
+    // the shortest history with the minimum number of fold-back-shaped
+    // joins, and the fewest t-BFB cycles among those. Filled only when a
+    // JoinTable is passed; equals (foldback_t, total, t_cycles) unless a
+    // history with more t-BFB cycles is shorter.
+    int fb_total = 0;
+    int fb_total_t = 0;
+    std::vector<Operation> fb_total_history;
 };
 
 // Experimental objective (off unless a JoinTable is passed). A t-BFB cycle

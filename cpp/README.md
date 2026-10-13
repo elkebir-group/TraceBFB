@@ -101,6 +101,45 @@ history exists with at most `f` such joins is a reachability question only, so
 those runs drop the t-count from the state (one layer per `f` instead of `n`),
 which is what keeps the flag about as fast as the default.
 
+### Comparing definitions of nestedness: `--definition prefix|lcp`
+
+```
+nbfb -i INSTANCE.txt --definition prefix [--foldback-first] [--history]   # either mode
+```
+
+Switches to a direct search over strings (`nbfb_state.hpp/.cpp`): every cycle lengthens
+the string, so the strings of length at most `|t|` form a DAG and are processed in order
+of length, keyed by the string itself, with every p-, i-, f- and t-BFB cycle enumerated
+explicitly (O(n^2) cycles per node; fine up to a few hundred segments, not a replacement
+for the index-tuple search).
+
+* `prefix`: nested as redefined on 2026-10-02. Every produced string is `t[1,psi] y` with
+  `y` empty, the reverse complement of a substring of `t`, or a source. No LCP condition.
+* `lcp`: the earlier class (p-, i-, f-BFB cycles extend the LCP; foldable tails except after
+  an advancing t-BFB cycle), i.e. what the index-tuple search solves. Kept for differential
+  testing: equal to the default on all 266 instances of
+  `CASTLE/derived/foldback_t/jobs.txt`, under both objectives.
+
+Same output format. `--foldback-total` is not supported with `--definition`. Results:
+`CASTLE/derived/nested_prefix_def/README.md`.
+
+### Block sources: `--blocks`
+
+```
+nbfb -i INSTANCE.txt --blocks [--foldback-first] [--history]   # either mode
+```
+
+Index-tuple search for the prefix definition of nestedness when the sources are all
+contiguous substrings, in both orientations, of the given source lines g_1..g_r
+(`nbfb_blocks.hpp/.cpp`, design and rules in `PREFIX_FAST_DESIGN.md`). A file that lists
+every block explicitly denotes the same source set, so the existing instance files work
+unchanged. Nodes are `t[1,phi] D[a,b]` with `D = rc(t) # g_1 # ... # rc(g_1)`. The
+successors of a node come in O(n) intervals, one occurrence query per cut point, for
+O(n^4) worst case. Every returned history is replayed on strings. Agrees with
+`--definition prefix` (over the explicit closure) on 35 real instances under both
+objectives. HCC1395 chr6q minimal (n = 81) takes 0.3 s against 63 s. HCC1954 chr15q
+(n = 87, 362 sources) takes 1.3 s. `--foldback-total` is not supported.
+
 ### Library
 
 ```cpp
