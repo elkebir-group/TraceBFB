@@ -4,7 +4,10 @@ LDFLAGS ?= -pthread
 
 OBJECTS = nbfb_cli.o nbfb.o nbfb_blocks.o nbfb_state.o
 
-all: nbfb
+all: nbfb lwalk
+
+lwalk: lwalk.cpp
+	$(CXX) $(CXXFLAGS) -o $@ lwalk.cpp
 
 nbfb: $(OBJECTS)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJECTS) $(LDFLAGS)
@@ -22,6 +25,6 @@ nbfb_state.o: nbfb_state.cpp nbfb_state.hpp nbfb.hpp
 	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_state.cpp
 
 clean:
-	rm -f nbfb $(OBJECTS)
+	rm -f nbfb lwalk $(OBJECTS)
 
 .PHONY: all clean

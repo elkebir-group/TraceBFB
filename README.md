@@ -206,3 +206,13 @@ python -m unittest discover -s tests -v
 
 The suite checks the nested and general searches against each other on
 simulated histories and checks that short-deletion histories are nested.
+
+## Python modules for analyses
+
+- `bfbdist.foldback_first.foldback_first_BFB_dist(sources, target)`: the BFB
+  distance minimum first in fold-back-shaped t-BFB cycles, then in t-BFB
+  cycles, then in total cycles, with one optimal history. `cpp/nbfb
+  --foldback-first` is the nested counterpart.
+- `bfbdist.breakpoint_graph.BreakpointGraph`: the breakpoint graph of a target
+  over the reference adjacencies of the sources (`from_target`), written in the
+  input format of `cpp/lwalk` (`write_lwalk`).

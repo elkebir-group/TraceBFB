@@ -19,3 +19,6 @@ target_compile_options(nbfb_lib PRIVATE -Wall -Wextra)
 add_executable(nbfb nbfb_cli.cpp)
 target_link_libraries(nbfb PRIVATE nbfb_lib Threads::Threads)
 target_compile_options(nbfb PRIVATE -Wall -Wextra)
+
+add_executable(lwalk lwalk.cpp)
+target_compile_options(lwalk PRIVATE -Wall -Wextra)
