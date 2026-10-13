@@ -86,12 +86,34 @@ struct Layer {
     explicit Layer(i32 n) : e_family(n + 1) {}
 };
 
+// Bytes charged to the shared budget, released on destruction (also when
+// the constructor throws after a charge).
+class Accounted {
+  public:
+    explicit Accounted(MemoryBudget& budget) : budget_(budget) {}
+    ~Accounted() { budget_.release(bytes_); }
+    void acquire(std::size_t bytes) {
+        budget_.acquire(bytes);
+        bytes_ += bytes;
+    }
+    void release(std::size_t bytes) {
+        budget_.release(bytes);
+        bytes_ -= bytes;
+    }
+
+  private:
+    MemoryBudget& budget_;
+    std::size_t bytes_ = 0;
+};
+
 class BlockSearch {
   public:
     BlockSearch(const PreparedSources& sources, const std::vector<int>& target,
                 MemoryBudget& budget, const JoinTable* joins)
-        : target_(target), n_(static_cast<i32>(target.size())),
-          budget_(budget), joins_(joins) {
+        : accounted_(budget), target_(target),
+          n_(static_cast<i32>(target.size())), joins_(joins) {
+        // The search state packs the t-BFB count into 16 bits.
+        if (n_ > 65534) throw std::invalid_argument("target too long");
         build_text(sources);
         build_lce();
         for (std::size_t k = 0; k < sources.forward.size(); ++k) {
@@ -99,10 +121,17 @@ class BlockSearch {
         }
     }
 
-    ~BlockSearch() { budget_.release(owned_); }
-
     Result solve(bool want_history) {
         Result result;
+        // Reachability first, with no bound on t-BFB cycles and fold-back
+        // joins ignored: an unreachable target costs one search.
+        const JoinTable* joins = joins_;
+        joins_ = nullptr;
+        reset(n_, 0, false);
+        const bool reachable = run() >= 0;
+        joins_ = joins;
+        if (!reachable) return result;
+
         long long goal = -1;
         if (joins_ == nullptr) {
             for (int bound = 1; bound <= n_ && goal < 0; ++bound) {
@@ -224,7 +253,7 @@ class BlockSearch {
             }
         }
         occ_.emplace(key, std::make_pair(best, pos));
-        if (occ_.size() % 4096 == 0) acquire(4096 * 48);
+        acquire(64);  // one hash-map entry
         return best;
     }
 
@@ -244,10 +273,9 @@ class BlockSearch {
         max_t_ = max_t;
         max_fb_ = max_fb;
         count_t_ = count_t;
-        records_.clear();
+        std::vector<Record>().swap(records_);
         layers_.clear();
-        budget_.release(search_bytes_);
-        owned_ -= search_bytes_;
+        accounted_.release(search_bytes_);
         search_bytes_ = 0;
     }
 
@@ -271,7 +299,12 @@ class BlockSearch {
     void push(char kind, int mask, i32 phi, i32 a, i32 b, u32 parent,
               char op_kind, i32 op_x, i32 op_y) {
         if (records_.size() == records_.capacity()) {
-            charge((records_.capacity() + 1024) * sizeof(Record));
+            const std::size_t old_bytes = records_.capacity() * sizeof(Record);
+            const std::size_t next = std::max<std::size_t>(1024, 2 * records_.capacity());
+            charge(next * sizeof(Record));
+            records_.reserve(next);
+            accounted_.release(old_bytes);
+            search_bytes_ -= old_bytes;
         }
         Record r;
         r.phi = phi;
@@ -618,10 +651,7 @@ class BlockSearch {
 
     // ------------------------------------------------------------ memory
 
-    void acquire(std::size_t bytes) {
-        budget_.acquire(bytes);
-        owned_ += bytes;
-    }
+    void acquire(std::size_t bytes) { accounted_.acquire(bytes); }
     void charge(std::size_t bytes) {
         acquire(bytes);
         search_bytes_ += bytes;
@@ -635,9 +665,9 @@ class BlockSearch {
         }
     };
 
+    Accounted accounted_;
     const std::vector<int>& target_;
     i32 n_;
-    MemoryBudget& budget_;
     const JoinTable* joins_;
 
     std::vector<int> X_;
@@ -655,7 +685,6 @@ class BlockSearch {
     std::vector<Record> records_;
     std::unordered_map<int, Layer> layers_;
 
-    std::size_t owned_ = 0;
     std::size_t search_bytes_ = 0;
 };
 

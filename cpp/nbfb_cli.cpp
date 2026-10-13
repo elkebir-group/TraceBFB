@@ -489,7 +489,17 @@ int main(int argc, char** argv) {
             foldback_first = true;
         } else if (argument == "--foldback-span") {
             const std::string span = value("--foldback-span");
-            foldback_span = span == "any" ? -1 : std::atoll(span.c_str());
+            if (span == "any") {
+                foldback_span = -1;
+            } else {
+                char* end = nullptr;
+                foldback_span = std::strtoll(span.c_str(), &end, 10);
+                if (span.empty() || *end != '\0' || foldback_span < 0) {
+                    std::cerr << "Error: --foldback-span must be a "
+                                 "non-negative integer or 'any'\n";
+                    return 2;
+                }
+            }
         } else if (argument == "--string-search") {
             string_search = true;
         } else if (argument == "-h" || argument == "--help") {

@@ -22,6 +22,6 @@ nbfb_state.o: nbfb_state.cpp nbfb_state.hpp nbfb.hpp
 	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_state.cpp
 
 clean:
-	rm -f nbfb $(OBJECTS) nbfb_fast.o
+	rm -f nbfb $(OBJECTS)
 
 .PHONY: all clean

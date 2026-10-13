@@ -142,7 +142,7 @@ print(graph.calculate_bfb_distance())  # 3: t, p, t
 for path in NBFB_dist(sources, target).get_paths():
     for state, child in zip(path, path[1:]):
         operation = graph.adjacency.get(state, {}).get(child)
-        print(state.sequence, state.used, operation)
+        print(state.sequence, state.translocations, operation)
 
 with open("result.graph", "w", encoding="utf-8") as output:
     graph.write_text(output)
@@ -150,8 +150,9 @@ with open("result.graph", "w", encoding="utf-8") as output:
 
 Both functions take a list of sources and a target and return a
 `BFBGraph`. Graph nodes are `State` objects pairing a sequence with the
-bitmask of appended source indices; `graph.start` is the empty state and
-`graph.end` the target with every source appended. Edges carry an
+number of t-BFB cycles applied so far (`translocations`). `graph.start` is
+the empty state, and `graph.ends()` lists the states that spell the target.
+Edges carry an
 `Operation` with a `kind` in `p`, `i`, `f`, `t`, the decomposition indices
 `x` and `y` for fold-back kinds, and the `source` index for `t`.
 
