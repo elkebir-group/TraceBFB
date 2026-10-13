@@ -19,7 +19,7 @@
 namespace nbfb {
 
 // One BFB cycle of a history, with the parameters of the Python
-// bfb_dist.history.Operation. For kinds 'p', 'i' and 'f' the sequence the
+// bfbdist.history.Operation. For kinds 'p', 'i' and 'f' the sequence the
 // cycle acts on decomposes as P = v[:x], Q = v[x:y], R = v[y:]; for kind
 // 't' the field source is the index of the appended source.
 struct Operation {

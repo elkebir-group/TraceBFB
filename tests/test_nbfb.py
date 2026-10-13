@@ -2,10 +2,10 @@ import math
 import random
 import unittest
 
-from bfb_dist.distance import BFB_dist
-from bfb_dist.history import start_state
-from bfb_dist.nbfb import NBFB_dist, _bounded_search
-from bfb_dist.simulation import _set_seed, simulate_history
+from bfbdist.distance import BFB_dist
+from bfbdist.history import start_state
+from bfbdist.nbfb import NBFB_dist, _bounded_search
+from bfbdist.simulation import _set_seed, simulate_history
 from tests.helpers import assert_valid_generated_graph, letters
 
 

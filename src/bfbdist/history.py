@@ -9,7 +9,7 @@ before the total number of cycles.
 
 from dataclasses import dataclass
 
-from bfb_dist.sequence import Sequence
+from bfbdist.sequence import Sequence
 
 
 KINDS = ("p", "i", "f", "t")

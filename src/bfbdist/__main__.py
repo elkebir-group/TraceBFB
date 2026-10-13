@@ -6,7 +6,7 @@ import sys
 
 def handle_simulate(args):
     """Run simulation and write its requested path artifacts."""
-    from bfb_dist.simulation import (
+    from bfbdist.simulation import (
         _set_seed,
         simulate_history,
         simulate_sources,
@@ -60,7 +60,7 @@ def read_instance(path):
         ValueError: If the file has fewer than two lines, contains a blank
             line, or contains a malformed sequence.
     """
-    from bfb_dist.sequence import Sequence
+    from bfbdist.sequence import Sequence
 
     with open(path, "r", encoding="utf-8") as input_file:
         lines = input_file.read().splitlines()
@@ -76,8 +76,8 @@ def read_instance(path):
 
 def handle_bfbdist(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
-    from bfb_dist.distance import BFB_dist
-    from bfb_dist.nbfb import NBFB_dist
+    from bfbdist.distance import BFB_dist
+    from bfbdist.nbfb import NBFB_dist
 
     try:
         sources, target = read_instance(args.input)

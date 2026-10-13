@@ -9,8 +9,8 @@ the target, or a source.
 from collections import defaultdict, deque
 import math
 
-from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.history import (
+from bfbdist.bfb_graph import BFBGraph
+from bfbdist.history import (
     Operation,
     State,
     start_state,

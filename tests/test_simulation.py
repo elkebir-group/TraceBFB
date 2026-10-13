@@ -3,9 +3,9 @@ from io import StringIO
 import re
 import unittest
 
-from bfb_dist.history import start_state
-from bfb_dist.sequence import Sequence
-from bfb_dist.simulation import (
+from bfbdist.history import start_state
+from bfbdist.sequence import Sequence
+from bfbdist.simulation import (
     _set_seed,
     simulate_history,
     simulate_reference_sequence,

@@ -12,7 +12,7 @@ BFBdist requires Python 3.7 or newer and has no runtime dependencies.
 python -m pip install .
 ```
 
-This installs the `bfbdist` command and the `bfb_dist` Python package.
+This installs the `bfbdist` command and the `bfbdist` Python package.
 
 ## Model
 
@@ -127,8 +127,8 @@ the corresponding uncolored path file.
 ## Python API
 
 ```python
-from bfb_dist import BFB_dist, NBFB_dist
-from bfb_dist.sequence import Sequence
+from bfbdist import BFB_dist, NBFB_dist
+from bfbdist.sequence import Sequence
 
 sources = [
     Sequence.from_string("chr1:100-200[R];chr1:200-300[R]"),
@@ -159,7 +159,7 @@ Edges carry an
 Read and validate a saved graph with:
 
 ```python
-from bfb_dist import BFBGraph
+from bfbdist import BFBGraph
 
 with open("result.graph", encoding="utf-8") as input_file:
     graph = BFBGraph.from_text(input_file)

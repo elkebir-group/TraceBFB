@@ -2,7 +2,7 @@
 //
 //   nbfb -i INSTANCE.txt [--history]
 //       One source per line, the target on the last line, in the format of
-//       bfb_dist's read_instance. Prints the distance on the last line of
+//       bfbdist's read_instance. Prints the distance on the last line of
 //       stdout, as an integer or "inf".
 //
 //   nbfb --sources SOURCES.txt --targets TARGETS.txt [-j N] [-o OUT.tsv]

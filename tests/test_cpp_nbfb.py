@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bfb_dist.nbfb import NBFB_dist
-from bfb_dist.sequence import Sequence
+from bfbdist.nbfb import NBFB_dist
+from bfbdist.sequence import Sequence
 
 CPP = Path(__file__).resolve().parents[1] / "cpp"
 

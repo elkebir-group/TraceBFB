@@ -5,9 +5,9 @@ import math
 import random
 import unittest
 
-from bfb_dist.distance import BFB_dist, _bounded_search
-from bfb_dist.nbfb import NBFB_dist
-from bfb_dist.sequence import LetterAsSegment, Sequence
+from bfbdist.distance import BFB_dist, _bounded_search
+from bfbdist.nbfb import NBFB_dist
+from bfbdist.sequence import LetterAsSegment, Sequence
 from tests.helpers import assert_valid_generated_graph, letters
 
 ALGORITHMS = (BFB_dist, NBFB_dist)

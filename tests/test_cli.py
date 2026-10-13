@@ -6,8 +6,8 @@ import sys
 import tempfile
 import unittest
 
-from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.sequence import Sequence
+from bfbdist.bfb_graph import BFBGraph
+from bfbdist.sequence import Sequence
 from tests.helpers import genomic_sequence
 
 
@@ -29,7 +29,7 @@ def cli_environment():
 class CLITests(unittest.TestCase):
     def run_cli(self, *arguments):
         return subprocess.run(
-            [sys.executable, "-m", "bfb_dist", *arguments],
+            [sys.executable, "-m", "bfbdist", *arguments],
             cwd=str(ROOT),
             env=cli_environment(),
             stdout=subprocess.PIPE,
@@ -167,8 +167,8 @@ class CLITests(unittest.TestCase):
 
     def test_python_module_api_works_in_external_process(self):
         code = (
-            "from bfb_dist import BFB_dist, BFBGraph, NBFB_dist;"
-            "from bfb_dist.sequence import LetterAsSegment, Sequence;"
+            "from bfbdist import BFB_dist, BFBGraph, NBFB_dist;"
+            "from bfbdist.sequence import LetterAsSegment, Sequence;"
             "s=Sequence([LetterAsSegment('A')]);"
             "g=BFB_dist([s],s);"
             "assert isinstance(g,BFBGraph);"

@@ -1,7 +1,7 @@
 import math
 
-from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.sequence import LetterAsSegment, Segment, Sequence
+from bfbdist.bfb_graph import BFBGraph
+from bfbdist.sequence import LetterAsSegment, Segment, Sequence
 
 
 def letters(text):
