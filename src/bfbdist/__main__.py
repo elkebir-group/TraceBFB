@@ -1,4 +1,4 @@
-"""Command-line interface for BFB-dist."""
+"""Command-line interface for BFBdist."""
 
 import argparse
 import sys
@@ -6,7 +6,7 @@ import sys
 
 def handle_simulate(args):
     """Run simulation and write its requested path artifacts."""
-    from bfb_dist.simulation import (
+    from bfbdist.simulation import (
         _set_seed,
         simulate_history,
         simulate_sources,
@@ -60,7 +60,7 @@ def read_instance(path):
         ValueError: If the file has fewer than two lines, contains a blank
             line, or contains a malformed sequence.
     """
-    from bfb_dist.sequence import Sequence
+    from bfbdist.sequence import Sequence
 
     with open(path, "r", encoding="utf-8") as input_file:
         lines = input_file.read().splitlines()
@@ -76,9 +76,8 @@ def read_instance(path):
 
 def handle_bfbdist(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
-    from bfb_dist.distance import BFB_dist
-    from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist
-    from bfb_dist.nbfb_fast import NBFB_fast_dist
+    from bfbdist.distance import BFB_dist
+    from bfbdist.nbfb import NBFB_dist
 
     try:
         sources, target = read_instance(args.input)
@@ -90,8 +89,6 @@ def handle_bfbdist(args):
     compute = {
         "bfb": BFB_dist,
         "nbfb": NBFB_dist,
-        "nbfb-fast": NBFB_fast_dist,
-        "lcp-monotone": LCP_monotone_dist,
     }[args.mode]
     graph = compute(sources, target)
 
@@ -117,7 +114,7 @@ def handle_bfbdist(args):
 
 def main():
     """Parse command-line arguments and dispatch the selected command."""
-    parser = argparse.ArgumentParser(description="BFB-dist command line utility")
+    parser = argparse.ArgumentParser(description="BFBdist command line utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sim_parser = subparsers.add_parser("simulate")
@@ -138,7 +135,7 @@ def main():
     dist_parser.add_argument("--colored", action="store_true")
     dist_parser.add_argument(
         "--mode",
-        choices=["bfb", "nbfb", "nbfb-fast", "lcp-monotone"],
+        choices=["bfb", "nbfb"],
         default="bfb",
     )
     dist_parser.set_defaults(func=handle_bfbdist)

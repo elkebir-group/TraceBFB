@@ -3,8 +3,8 @@
 from collections import defaultdict, deque
 import math
 
-from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.history import Operation, State, start_state, validate_sources
+from bfbdist.bfb_graph import BFBGraph
+from bfbdist.history import Operation, State, start_state, validate_sources
 
 
 def _relabel_forward(G, start_backward, total):
@@ -104,7 +104,7 @@ def BFB_dist(sources, target):
     minimum first in the number of t-BFB cycles and then in the total
     number of cycles.
 
-    The returned :class:`~bfb_dist.bfb_graph.BFBGraph` contains only edges
+    The returned :class:`~bfbdist.bfb_graph.BFBGraph` contains only edges
     between consecutive distance layers. Its distance is the number of
     cycles, counting the t-BFB cycles, zero when the target is empty, and
     ``math.inf`` when the target is unreachable. A source may be appended

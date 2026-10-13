@@ -1,16 +1,16 @@
-"""Nested and LCP-monotone deletion-aware BFB distance (forward search).
+"""Nested deletion-aware BFB distance (forward search).
 
 ``NBFB_dist`` is the breadth-first search over the NBFB graph of the paper
-(Algorithm NBFB-Distance, ``O(2^m n^6)`` time). ``LCP_monotone_dist`` is the
-same search without the foldability test, over the exponentially large
-LCP-monotone graph of the appendix.
+(Algorithm NBFB-Distance): every string of a nested history is
+``t[1, psi] y`` with ``y`` empty, the reverse complement of a substring of
+the target, or a source.
 """
 
 from collections import defaultdict, deque
 import math
 
-from bfb_dist.bfb_graph import BFBGraph
-from bfb_dist.history import (
+from bfbdist.bfb_graph import BFBGraph
+from bfbdist.history import (
     Operation,
     State,
     start_state,
@@ -18,10 +18,22 @@ from bfb_dist.history import (
 )
 
 
-def _is_foldable(sequence, target):
-    """Return whether the tail of ``sequence`` beyond its LCP is foldable."""
-    tail = sequence[sequence.lcp_length(target):]
-    return len(tail) == 0 or tail.reverse_complement().is_infix_of(target)
+def _is_nested(sequence, sources, target):
+    """Return whether ``sequence`` is a node of the NBFB graph.
+
+    With ``phi`` the longest common prefix of ``sequence`` and the target and
+    ``u`` the tail beyond it, the sequence is nested iff ``u`` is empty, the
+    reverse complement of ``u`` occurs in the target, or some source of
+    length at least ``|u|`` is a suffix of the sequence.
+    """
+    phi = sequence.lcp_length(target)
+    tail = sequence[phi:]
+    if len(tail) == 0 or tail.reverse_complement().is_infix_of(target):
+        return True
+    return any(
+        len(source) >= len(tail) and source.is_suffix_of(sequence)
+        for source in sources
+    )
 
 
 def _truncate_G(G, start, ends):
@@ -58,26 +70,18 @@ def _truncate_G(G, start, ends):
     return adjacency or {start: {}}
 
 
-def _successors(node, sources, target, foldable, max_translocations):
+def _successors(node, sources, target, max_translocations):
     """Yield ``(child, operation)`` pairs of one BFB cycle.
 
-    Children of p-, i-, and f-BFB cycles must strictly extend the matched
-    prefix and, when ``foldable`` is true, have a foldable tail. Children of
-    t-BFB cycles may keep the matched prefix unchanged; a child that extends
-    the prefix is exempt from foldability, as the appended source is given
-    rather than produced by a fold-back, whereas a child that keeps the
-    prefix must have a foldable tail when ``foldable`` is true. Children
-    longer than the target are discarded, as no cycle shortens a sequence,
-    and so are t-BFB children beyond ``max_translocations`` cycles.
+    A child is kept when it is a node of the NBFB graph: at most as long as
+    the target (no cycle shortens a sequence) and nested. t-BFB children
+    beyond ``max_translocations`` cycles are discarded.
     """
     sequence = node.sequence
-    phi = sequence.lcp_length(target)
     n = len(target)
 
     for child, x, y, is_forward_deletion in sequence.successors():
-        if len(child) > n or child.lcp_length(target) <= phi:
-            continue
-        if foldable and not _is_foldable(child, target):
+        if len(child) > n or not _is_nested(child, sources, target):
             continue
         operation = Operation.fold_back(
             x, y, is_forward_deletion, len(sequence)
@@ -88,18 +92,15 @@ def _successors(node, sources, target, foldable, max_translocations):
         return
     for index, source in enumerate(sources):
         child = sequence + source
-        if len(child) > n:
+        if len(child) > n or not _is_nested(child, sources, target):
             continue
-        if child.lcp_length(target) <= phi and foldable:
-            if not _is_foldable(child, target):
-                continue
         yield (
             State(child, node.translocations + 1),
             Operation.translocation(index),
         )
 
 
-def _bounded_search(sources, target, foldable, max_translocations):
+def _bounded_search(sources, target, max_translocations):
     """Breadth-first search with at most ``max_translocations`` t-BFB cycles.
 
     Returns the layered adjacency, the start state, the end states of the
@@ -119,7 +120,7 @@ def _bounded_search(sources, target, foldable, max_translocations):
 
         new_cost = cost[node] + 1
         for child, operation in _successors(
-            node, sources, target, foldable, max_translocations
+            node, sources, target, max_translocations
         ):
             if child not in cost:
                 cost[child] = new_cost
@@ -136,9 +137,10 @@ def _bounded_search(sources, target, foldable, max_translocations):
     return G, start, ends, bfb_distance
 
 
-def _search(sources, target, foldable):
-    """Infer every history in the selected class that is minimum first in
-    the number of t-BFB cycles and then in the total number of cycles.
+def NBFB_dist(sources, target):
+    """Infer every nested history over ``sources`` to ``target`` that is
+    minimum first in the number of t-BFB cycles and then in the total
+    number of cycles.
 
     The search deepens the bound on t-BFB cycles from one upward; the
     first bound admitting a history is the minimum number of t-BFB cycles,
@@ -153,19 +155,10 @@ def _search(sources, target, foldable):
 
     for max_translocations in range(1, len(target) + 1):
         G, start, ends, bfb_distance = _bounded_search(
-            sources, target, foldable, max_translocations
+            sources, target, max_translocations
         )
         if ends:
             adjacency = _truncate_G(G, start, ends)
             return BFBGraph(adjacency, sources, target, bfb_distance)
     return BFBGraph({start: {}}, sources, target, math.inf)
 
-
-def NBFB_dist(sources, target):
-    """Infer every minimum-length nested history over ``sources`` to ``target``."""
-    return _search(sources, target, foldable=True)
-
-
-def LCP_monotone_dist(sources, target):
-    """Infer every minimum-length LCP-monotone history over ``sources``."""
-    return _search(sources, target, foldable=False)

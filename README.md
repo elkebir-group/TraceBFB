@@ -1,23 +1,23 @@
-# BFB-dist
+# BFBdist
 
-BFB-dist simulates breakage-fusion-bridge (BFB) histories over a set of
+BFBdist simulates breakage-fusion-bridge (BFB) histories over a set of
 source sequences and infers minimum-length histories that produce a target
 sequence.
 
 ## Installation
 
-BFB-dist requires Python 3.7 or newer and has no runtime dependencies.
+BFBdist requires Python 3.7 or newer and has no runtime dependencies.
 
 ```bash
 python -m pip install .
 ```
 
-This installs the `bfb-dist` command and the `bfb_dist` Python package.
+This installs the `bfbdist` command and the `bfbdist` Python package.
 
 ## Model
 
-A history starts from the empty sequence and applies BFB cycles. Every
-history over a set of sources appends each source exactly once. For a
+A history starts from the empty sequence and applies BFB cycles. A source
+may be appended any number of times. For a
 sequence `P + Q + R` with nonempty `Q`, the cycles are:
 
 | kind | name                          | result                                        | constraint    |
@@ -25,18 +25,17 @@ sequence `P + Q + R` with nonempty `Q`, the cycles are:
 | `p`  | proper BFB                    | `P + Q + reverse_complement(Q)`               | `R` empty     |
 | `i`  | inverted-part deletion        | `P + Q + R + reverse_complement(Q)`           | `R` nonempty  |
 | `f`  | forward-part deletion         | `P + Q + reverse_complement(R) + reverse_complement(Q)` | `R` nonempty |
-| `t`  | translocation                 | `sequence + source`                           | source unused |
+| `t`  | translocation                 | `sequence + source`                           |               |
 
-The **BFB distance** of a set of sources and a target is the length of a
-shortest history producing the target, counting every cycle, including the
-`t` cycles. It is `0` only for an empty target with no source, and infinite
-when no history exists.
+The **BFB distance** of a set of sources and a target is the cost of an
+optimal history producing the target: minimum first in the number of `t`
+cycles and then in the total number of cycles. It is `0` only for an empty
+target, and infinite when no history exists.
 
-A history is **nested** if every cycle extends the longest common prefix
-with the target, and the remainder of every sequence produced by a `p`, `i`,
-or `f` cycle (its *tail*) is the reverse complement of a substring of the
-target. Sequences produced by `t` cycles are exempt from the second
-condition. The **NBFB distance** is the length of a shortest nested history.
+A history is **nested** if every sequence it produces is `t[1, psi] y`, a
+prefix of the target followed by a string `y` that is empty, the reverse
+complement of a substring of the target, or a source. The **NBFB distance**
+is the cost of an optimal nested history.
 
 ## Sequence format
 
@@ -54,7 +53,7 @@ the reference orientation and `C` the reverse-complement orientation.
 ### Simulate a history
 
 ```bash
-bfb-dist simulate \
+bfbdist simulate \
     --seed 11 \
     --n-sources 2 \
     --n-segments 5 \
@@ -73,7 +72,7 @@ preceding cycle added, which guarantees a nested history.
 The command creates:
 
 - `simulation.input`: the sources followed by the target, one per line,
-  ready for `bfb-dist distance`.
+  ready for `bfbdist distance`.
 - `simulation.paths`: the sequence after every cycle, one per line.
 - `simulation.paths.ansi`: the same sequences with ANSI coloring when
   `--colored` is supplied.
@@ -94,7 +93,7 @@ chr1:100-200[R];chr1:200-300[R];chr1:300-200[C];chr2:500-600[R]
 Then run:
 
 ```bash
-bfb-dist distance --input sequences.txt --out result --colored
+bfbdist distance --input sequences.txt --out result --colored
 ```
 
 The distance is printed to standard output. Pass `--mode` to select the
@@ -103,12 +102,9 @@ history class and algorithm:
 - `--mode bfb` (default): the general BFB distance, by backward search from
   the target. Exponential time.
 - `--mode nbfb`: the NBFB distance, by breadth-first search over the NBFB
-  graph in `O(2^m n^6)` time for `m` sources and a target of `n` segments.
-  Returns every minimum-length nested history.
-- `--mode nbfb-fast`: the NBFB distance in `O(2^m n^4)` time, over index
-  tuples into the target. Returns one minimum-length nested history.
-- `--mode lcp-monotone`: histories that extend the common prefix with the
-  target at every cycle, without the tail condition. Exponential time.
+  graph. Returns every optimal nested history. For large instances use the
+  C++ tool in `cpp/` (`nbfb`), which runs in `O(n^4)` time when the sources
+  are all blocks of a few strings.
 
 The command creates:
 
@@ -131,8 +127,8 @@ the corresponding uncolored path file.
 ## Python API
 
 ```python
-from bfb_dist import BFB_dist, NBFB_dist, NBFB_fast_dist, LCP_monotone_dist
-from bfb_dist.sequence import Sequence
+from bfbdist import BFB_dist, NBFB_dist
+from bfbdist.sequence import Sequence
 
 sources = [
     Sequence.from_string("chr1:100-200[R];chr1:200-300[R]"),
@@ -146,26 +142,24 @@ print(graph.calculate_bfb_distance())  # 3: t, p, t
 for path in NBFB_dist(sources, target).get_paths():
     for state, child in zip(path, path[1:]):
         operation = graph.adjacency.get(state, {}).get(child)
-        print(state.sequence, state.used, operation)
+        print(state.sequence, state.translocations, operation)
 
 with open("result.graph", "w", encoding="utf-8") as output:
     graph.write_text(output)
 ```
 
-All four functions take a list of sources and a target and return a
+Both functions take a list of sources and a target and return a
 `BFBGraph`. Graph nodes are `State` objects pairing a sequence with the
-bitmask of appended source indices; `graph.start` is the empty state and
-`graph.end` the target with every source appended. Edges carry an
+number of t-BFB cycles applied so far (`translocations`). `graph.start` is
+the empty state, and `graph.ends()` lists the states that spell the target.
+Edges carry an
 `Operation` with a `kind` in `p`, `i`, `f`, `t`, the decomposition indices
 `x` and `y` for fold-back kinds, and the `source` index for `t`.
-
-`NBFB_fast_dist` verifies the history it reconstructs by replaying the
-operations on sequences, and raises `RuntimeError` on any inconsistency.
 
 Read and validate a saved graph with:
 
 ```python
-from bfb_dist import BFBGraph
+from bfbdist import BFBGraph
 
 with open("result.graph", encoding="utf-8") as input_file:
     graph = BFBGraph.from_text(input_file)
@@ -210,5 +204,5 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
 python -m unittest discover -s tests -v
 ```
 
-The suite cross-checks `NBFB_dist` against `NBFB_fast_dist` on simulated
-histories and checks that short-deletion histories are nested.
+The suite checks the nested and general searches against each other on
+simulated histories and checks that short-deletion histories are nested.

@@ -2,17 +2,17 @@
 
 import math
 
-from bfb_dist.history import Operation, State, start_state, validate_sources
-from bfb_dist.sequence import Sequence
-from bfb_dist.utils import format_operation_line
+from bfbdist.history import Operation, State, start_state, validate_sources
+from bfbdist.sequence import Sequence
+from bfbdist.utils import format_operation_line
 
 
 class BFBGraph:
     """A directed graph containing minimum-length BFB histories.
 
-    Nodes are :class:`~bfb_dist.history.State` objects. ``adjacency`` maps
+    Nodes are :class:`~bfbdist.history.State` objects. ``adjacency`` maps
     each non-end node to a mapping from child states to the
-    :class:`~bfb_dist.history.Operation` producing them. Every history
+    :class:`~bfbdist.history.Operation` producing them. Every history
     starts at ``start`` (the empty sequence with no t-BFB cycle applied)
     and ends at an *end state*, a state whose sequence is the target. All
     histories of a valid graph apply the same number of t-BFB cycles and
@@ -183,7 +183,7 @@ class BFBGraph:
         return parse_state(child_text), Operation.from_fields(operation_fields)
 
     def write_text(self, output):
-        """Write the graph in BFB-dist adjacency-list format."""
+        """Write the graph in BFBdist adjacency-list format."""
         output.write(f"{self.target}\n")
         output.write("\t".join(map(str, self.sources)) + "\n")
         for node in sorted(self.adjacency, key=str):

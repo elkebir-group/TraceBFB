@@ -2,8 +2,8 @@ from collections import defaultdict
 import math
 import unittest
 
-from bfb_dist.distance import BFB_dist, _relabel_forward
-from bfb_dist.history import Operation, State, start_state
+from bfbdist.distance import BFB_dist, _relabel_forward
+from bfbdist.history import Operation, State, start_state
 from tests.helpers import assert_valid_generated_graph, letters
 
 
