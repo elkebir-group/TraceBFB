@@ -6,12 +6,11 @@ import random
 import unittest
 
 from bfb_dist.distance import BFB_dist, _bounded_search
-from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist
-from bfb_dist.nbfb_fast import NBFB_fast_dist
+from bfb_dist.nbfb import NBFB_dist
 from bfb_dist.sequence import LetterAsSegment, Sequence
 from tests.helpers import assert_valid_generated_graph, letters
 
-ALGORITHMS = (BFB_dist, NBFB_dist, NBFB_fast_dist, LCP_monotone_dist)
+ALGORITHMS = (BFB_dist, NBFB_dist)
 
 
 class SourceReuseTests(unittest.TestCase):
@@ -129,7 +128,7 @@ class RelaxedNestedTests(unittest.TestCase):
                 ]
                 self.assertEqual(kinds, ["t", "i", "t", "f"])
 
-    def test_fast_and_slow_nested_searches_agree(self):
+    def test_general_distance_is_at_most_nested(self):
         rng = random.Random(20260916)
         alphabet = "ABab"
         for _ in range(150):
@@ -142,8 +141,6 @@ class RelaxedNestedTests(unittest.TestCase):
                 def label(graph):
                     return (graph.translocation_count(), graph.calculate_bfb_distance())
                 slow = label(NBFB_dist(sources, target))
-                fast = label(NBFB_fast_dist(sources, target))
-                self.assertEqual(slow, fast)
                 general = label(BFB_dist(sources, target))
                 self.assertLessEqual(general, slow)
 

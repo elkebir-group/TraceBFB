@@ -99,7 +99,7 @@ class CLITests(unittest.TestCase):
             input_path.write_text(
                 f"{first}\n{second}\n{target}\n", encoding="utf-8"
             )
-            for mode in ("bfb", "nbfb", "nbfb-fast", "lcp-monotone"):
+            for mode in ("bfb", "nbfb"):
                 with self.subTest(mode=mode):
                     prefix = Path(directory) / mode
                     result = self.run_cli(
@@ -160,20 +160,20 @@ class CLITests(unittest.TestCase):
             # The simulated instance feeds straight into the distance command.
             result = self.run_cli(
                 "distance", "-i", str(input_path),
-                "-o", str(Path(directory) / "result"), "--mode", "nbfb-fast",
+                "-o", str(Path(directory) / "result"), "--mode", "nbfb",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertLessEqual(int(result.stdout), 4)
 
     def test_python_module_api_works_in_external_process(self):
         code = (
-            "from bfb_dist import BFB_dist, BFBGraph, NBFB_fast_dist;"
+            "from bfb_dist import BFB_dist, BFBGraph, NBFB_dist;"
             "from bfb_dist.sequence import LetterAsSegment, Sequence;"
             "s=Sequence([LetterAsSegment('A')]);"
             "g=BFB_dist([s],s);"
             "assert isinstance(g,BFBGraph);"
             "assert g.bfb_distance == 1;"
-            "assert NBFB_fast_dist([s],s).calculate_bfb_distance() == 1"
+            "assert NBFB_dist([s],s).calculate_bfb_distance() == 1"
         )
 
         result = subprocess.run(

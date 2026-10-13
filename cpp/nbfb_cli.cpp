@@ -9,29 +9,24 @@
 //       One shared source set and one target per line. Prints one TSV row
 //       per target.
 //
-//   --foldback-first [--foldback-span BP|any]   (experimental, either mode)
+//   The sources are all contiguous substrings of the source lines and
+//   their reverse complements (a file listing every block denotes the same
+//   set); see nbfb_blocks.hpp.
+//
+//   --foldback-first [--foldback-span BP|any]   (either mode)
 //       Minimize first the number of t-BFB cycles whose join is
 //       fold-back-shaped: the segment before the join and the first segment
 //       of the appended source lie on the same chromosome in opposite
 //       orientations, with breakpoints at most BP apart (default 50000).
 //       Adds a foldback_t line / column; such cycles print as 'T'.
-//   --foldback-total   (experimental, implies --foldback-first)
-//       Also report the objective (fold-back-shaped t-BFB cycles, total
-//       cycles, t-BFB cycles): fb_total, fb_total_t and fb_total_types.
-//   --definition prefix|lcp   (either mode)
-//       Use the direct search over strings of nbfb_state.hpp instead of
-//       the index-tuple search. "prefix" is the nested class of
-//       2026-10-02 (every string is t[1,psi] y, y empty, an inverted window
-//       of t, or a source); "lcp" is the earlier LCP-monotone class that
-//       the index-tuple search solves, for differential testing.
-//   --blocks   (either mode)
-//       The sources are all contiguous substrings of the given source
-//       lines and their reverse complements (nbfb_blocks.hpp): the
-//       index-tuple search for the prefix definition of nestedness.
+//   --string-search   (either mode)
+//       Use the direct search over strings of nbfb_state.hpp, with the
+//       sources taken exactly as listed (no closure under substrings). The
+//       exact reference for testing; O(n^2) cycles per node.
 
-#include "nbfb_fast.hpp"
-#include "nbfb_state.hpp"
+#include "nbfb.hpp"
 #include "nbfb_blocks.hpp"
+#include "nbfb_state.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -252,28 +247,22 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 
 // -------------------------------------------------------------- modes
 
-// Set by --definition; null selects the index-tuple search.
-const nbfb::Definition* state_definition = nullptr;
-// Set by --blocks: the sources are all substrings of the given lines.
-bool use_blocks = false;
+// Set by --string-search.
+bool string_search = false;
 
 nbfb::Result solve(const nbfb::PreparedSources& sources,
                    const std::vector<int>& target, bool want_history,
                    nbfb::MemoryBudget& budget, const nbfb::JoinTable* joins) {
-    if (use_blocks) {
-        return nbfb::nbfb_blocks_dist(sources, target, want_history, budget,
-                                      joins);
-    }
-    if (state_definition != nullptr) {
+    if (string_search) {
         return nbfb::nbfb_state_dist(sources, target, want_history, budget,
-                                     *state_definition, joins);
+                                     joins);
     }
-    return nbfb::nbfb_fast_dist(sources, target, want_history, budget, joins);
+    return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
 }
 
 int run_single(const std::string& path, bool want_history,
                nbfb::MemoryBudget& budget, bool foldback_first,
-               long long foldback_span, bool foldback_total) {
+               long long foldback_span) {
     const std::vector<std::string> lines = read_lines(path);
     bool bad = lines.size() < 2;
     for (const std::string& line : lines) {
@@ -302,23 +291,6 @@ int run_single(const std::string& path, bool want_history,
                   << (result.reachable ? std::to_string(result.foldback_t)
                                        : std::string("inf"))
                   << "\n";
-    }
-    if (foldback_total) {
-        if (result.reachable) {
-            std::cout << "fb_total: " << result.fb_total << "\n";
-            std::cout << "fb_total_t: " << result.fb_total_t << "\n";
-            if (want_history) {
-                std::cout << "fb_total_types: "
-                          << types_of(result.fb_total_history) << "\n";
-                std::cout << "fb_total_operations: "
-                          << ops_of(result.fb_total_history) << "\n";
-            }
-        } else {
-            std::cout << "fb_total: inf\nfb_total_t: inf\n";
-            if (want_history) {
-                std::cout << "fb_total_types: \nfb_total_operations: \n";
-            }
-        }
     }
     if (want_history) {
         if (result.reachable) {
@@ -349,10 +321,6 @@ struct Row {
     int total = 0;
     std::string types;
     std::string ops;
-    int fb_total = 0;
-    int fb_total_t = 0;
-    std::string fb_total_types;
-    std::string fb_total_ops;
     double seconds = 0.0;
     std::string error;
 };
@@ -360,7 +328,7 @@ struct Row {
 int run_batch(const std::string& sources_path, const std::string& targets_path,
               int threads, const std::string& out_path, bool want_history,
               nbfb::MemoryBudget& budget, bool foldback_first,
-              long long foldback_span, bool foldback_total) {
+              long long foldback_span) {
     SegmentInterner interner;
     std::vector<std::vector<int>> sources;
     for (const std::string& line : read_lines(sources_path)) {
@@ -411,12 +379,6 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
                 row.total = result.total;
                 row.types = types_of(result.history);
                 if (want_history) row.ops = ops_of(result.history);
-                row.fb_total = result.fb_total;
-                row.fb_total_t = result.fb_total_t;
-                row.fb_total_types = types_of(result.fb_total_history);
-                if (want_history) {
-                    row.fb_total_ops = ops_of(result.fb_total_history);
-                }
             } catch (const std::exception& error) {
                 row.ok = false;
                 row.error = error.what();
@@ -449,10 +411,6 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
     *out << "index\ttokens\t" << (foldback_first ? "foldback_t\t" : "")
          << "t_cycles\ttotal\ttypes\tseconds";
     if (want_history) *out << "\tops";
-    if (foldback_total) {
-        *out << "\tfb_total\tfb_total_t\tfb_total_types";
-        if (want_history) *out << "\tfb_total_ops";
-    }
     *out << "\n";
     int failures = 0;
     for (std::size_t i = 0; i < rows.size(); ++i) {
@@ -476,13 +434,6 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
         std::snprintf(buffer, sizeof(buffer), "%.4f", row.seconds);
         *out << buffer;
         if (want_history) *out << '\t' << row.ops;
-        if (foldback_total) {
-            if (!row.ok) *out << "\terror\terror\t";
-            else if (!row.reachable) *out << "\tinf\tinf\t";
-            else *out << '\t' << row.fb_total << '\t' << row.fb_total_t
-                      << '\t' << row.fb_total_types;
-            if (want_history) *out << '\t' << row.fb_total_ops;
-        }
         *out << "\n";
     }
     out->flush();
@@ -495,8 +446,7 @@ void usage() {
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
            "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--foldback-total]\n"
-           "       either form: [--definition prefix|lcp] [--blocks]\n";
+           "[--string-search]\n";
 }
 
 }  // namespace
@@ -510,9 +460,7 @@ int main(int argc, char** argv) {
     bool want_history = false;
     double max_mem_gb = 2.0;
     bool foldback_first = false;
-    bool foldback_total = false;
     long long foldback_span = 50000;
-    nbfb::Definition definition = nbfb::Definition::Prefix;
 
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -539,25 +487,11 @@ int main(int argc, char** argv) {
             max_mem_gb = std::atof(value("--max-mem-gb").c_str());
         } else if (argument == "--foldback-first") {
             foldback_first = true;
-        } else if (argument == "--foldback-total") {
-            foldback_first = true;
-            foldback_total = true;
         } else if (argument == "--foldback-span") {
             const std::string span = value("--foldback-span");
             foldback_span = span == "any" ? -1 : std::atoll(span.c_str());
-        } else if (argument == "--definition") {
-            const std::string name = value("--definition");
-            if (name == "prefix") {
-                definition = nbfb::Definition::Prefix;
-            } else if (name == "lcp") {
-                definition = nbfb::Definition::Lcp;
-            } else {
-                std::cerr << "Error: --definition must be prefix or lcp\n";
-                return 2;
-            }
-            state_definition = &definition;
-        } else if (argument == "--blocks") {
-            use_blocks = true;
+        } else if (argument == "--string-search") {
+            string_search = true;
         } else if (argument == "-h" || argument == "--help") {
             usage();
             return 0;
@@ -573,15 +507,6 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (threads < 1) threads = 1;
-    if (use_blocks && (state_definition != nullptr || foldback_total)) {
-        std::cerr << "Error: --blocks cannot be combined with --definition "
-                     "or --foldback-total\n";
-        return 2;
-    }
-    if (state_definition != nullptr && foldback_total) {
-        std::cerr << "Error: --foldback-total needs the index-tuple search\n";
-        return 2;
-    }
     nbfb::MemoryBudget budget(
         static_cast<std::size_t>(max_mem_gb * 1024.0 * 1024.0 * 1024.0));
 
@@ -593,14 +518,14 @@ int main(int argc, char** argv) {
                 return 2;
             }
             return run_single(instance, want_history, budget, foldback_first,
-                              foldback_span, foldback_total);
+                              foldback_span);
         }
         if (sources.empty() || targets.empty()) {
             usage();
             return 2;
         }
         return run_batch(sources, targets, threads, out, want_history, budget,
-                         foldback_first, foldback_span, foldback_total);
+                         foldback_first, foldback_span);
     } catch (const nbfb::MemoryLimitExceeded& error) {
         std::cerr << "Error: " << error.what()
                   << " (raise --max-mem-gb to continue)\n";

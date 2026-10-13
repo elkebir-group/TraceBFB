@@ -77,8 +77,7 @@ def read_instance(path):
 def handle_bfbdist(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
     from bfb_dist.distance import BFB_dist
-    from bfb_dist.nbfb import LCP_monotone_dist, NBFB_dist
-    from bfb_dist.nbfb_fast import NBFB_fast_dist
+    from bfb_dist.nbfb import NBFB_dist
 
     try:
         sources, target = read_instance(args.input)
@@ -90,8 +89,6 @@ def handle_bfbdist(args):
     compute = {
         "bfb": BFB_dist,
         "nbfb": NBFB_dist,
-        "nbfb-fast": NBFB_fast_dist,
-        "lcp-monotone": LCP_monotone_dist,
     }[args.mode]
     graph = compute(sources, target)
 
@@ -138,7 +135,7 @@ def main():
     dist_parser.add_argument("--colored", action="store_true")
     dist_parser.add_argument(
         "--mode",
-        choices=["bfb", "nbfb", "nbfb-fast", "lcp-monotone"],
+        choices=["bfb", "nbfb"],
         default="bfb",
     )
     dist_parser.set_defaults(func=handle_bfbdist)

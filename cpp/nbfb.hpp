@@ -1,21 +1,13 @@
-// Nested BFB distance over a reusable source set: C++17 port of
-// src/bfb_dist/nbfb_fast.py (NBFB_fast_dist).
+// Types shared by the nested BFB searches.
 //
 // A sequence of oriented genomic segments is represented by a vector of
 // signed segment identifiers: every distinct segment interval gets a
 // positive identifier, and the reverse complement of a segment is the
 // negated identifier (a whole sequence is reverse complemented by
 // reversing the order and negating every identifier).
-//
-// The search is the breadth-first search of the paper appendix "An
-// O(2^m n^4)-Time Algorithm for NBFB Distance", over the index tuples
-// E(phi), W(phi, a, b) and T(phi0, x), with the state extended by the
-// number of t-BFB cycles applied so far. The driver deepens a bound on
-// that number, so the returned distance is minimum first in t-BFB cycles
-// and then in the total number of cycles.
 
-#ifndef NBFB_FAST_HPP
-#define NBFB_FAST_HPP
+#ifndef NBFB_HPP
+#define NBFB_HPP
 
 #include <atomic>
 #include <cstddef>
@@ -44,20 +36,11 @@ struct Result {
     int t_cycles = 0;        // number of t-BFB cycles of the optimum
     int total = 0;           // total number of cycles of the optimum
     std::vector<Operation> history;  // filled only when requested
-
-    // Objective (fold-back-shaped t-BFB cycles, total cycles, t-BFB cycles):
-    // the shortest history with the minimum number of fold-back-shaped
-    // joins, and the fewest t-BFB cycles among those. Filled only when a
-    // JoinTable is passed; equals (foldback_t, total, t_cycles) unless a
-    // history with more t-BFB cycles is shorter.
-    int fb_total = 0;
-    int fb_total_t = 0;
-    std::vector<Operation> fb_total_history;
 };
 
-// Experimental objective (off unless a JoinTable is passed). A t-BFB cycle
-// appending a source that starts with segment v to a sequence that ends
-// with segment u creates the join u -> v; is_foldback(u, v) says whether
+// Fold-back-first objective (off unless a JoinTable is passed). A t-BFB
+// cycle appending a source that starts with segment v to a sequence that
+// ends with segment u creates the join u -> v; is_foldback(u, v) says whether
 // that join is fold-back-shaped. With a table, the distance is minimum
 // first in the number of t-BFB cycles creating such a join, then in t-BFB
 // cycles, then in the total number of cycles.
@@ -110,21 +93,6 @@ struct PreparedSources {
     explicit PreparedSources(std::vector<std::vector<int>> sources);
 };
 
-// Computes the nested BFB distance of target over the given sources.
-// Throws std::invalid_argument when a source is empty (as the Python
-// validate_sources does) or when the instance exceeds the index limits,
-// and MemoryLimitExceeded when the budget is exhausted.
-Result nbfb_fast_dist(const PreparedSources& sources,
-                      const std::vector<int>& target,
-                      bool want_history,
-                      MemoryBudget& budget,
-                      const JoinTable* foldback_first = nullptr);
-
-// Convenience overload with an unbounded budget.
-Result nbfb_fast_dist(const std::vector<std::vector<int>>& sources,
-                      const std::vector<int>& target,
-                      bool want_history = false);
-
 }  // namespace nbfb
 
-#endif  // NBFB_FAST_HPP
+#endif  // NBFB_HPP

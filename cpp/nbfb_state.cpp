@@ -76,12 +76,10 @@ class Accounted {
 class StateSearch {
   public:
     StateSearch(const PreparedSources& sources, const Sequence& target,
-                MemoryBudget& budget, Definition definition,
-                const JoinTable* joins)
+                MemoryBudget& budget, const JoinTable* joins)
         : sources_(sources.forward),
           target_(target),
           n_(target.size()),
-          definition_(definition),
           joins_(joins),
           accounted_(budget) {
         for (const Sequence& source : sources_) {
@@ -166,12 +164,7 @@ class StateSearch {
         return false;
     }
 
-    bool admitted(const Sequence& child, std::size_t parent_phi, char kind) const {
-        const std::size_t phi = lcp(child);
-        if (definition_ == Definition::Prefix) return nice(child, phi);
-        if (kind != 't') return phi > parent_phi && foldable(child, phi);
-        return phi > parent_phi || foldable(child, phi);
-    }
+    bool admitted(const Sequence& child) const { return nice(child, lcp(child)); }
 
     void add_node(Sequence sequence, const Cost& cost, std::uint32_t parent,
                   const Operation& operation,
@@ -204,7 +197,6 @@ class StateSearch {
         const Sequence s = nodes_[id].sequence;
         const Cost cost = nodes_[id].cost;
         const std::size_t length = s.size();
-        const std::size_t phi = lcp(s);
 
         Cost fold = cost;
         fold.total += 1;
@@ -220,7 +212,7 @@ class StateSearch {
                 Sequence keep(s);
                 keep.insert(keep.end(), qbar.begin(), qbar.end());
                 operation.kind = y == length ? 'p' : 'i';
-                if (admitted(keep, phi, operation.kind)) {
+                if (admitted(keep)) {
                     add_node(std::move(keep), fold, id, operation, by_length);
                 }
 
@@ -231,7 +223,7 @@ class StateSearch {
                     flip.insert(flip.end(), rbar.begin(), rbar.end());
                     flip.insert(flip.end(), qbar.begin(), qbar.end());
                     operation.kind = 'f';
-                    if (admitted(flip, phi, 'f')) {
+                    if (admitted(flip)) {
                         add_node(std::move(flip), fold, id, operation, by_length);
                     }
                 }
@@ -243,7 +235,7 @@ class StateSearch {
             if (length + source.size() > n_) continue;
             Sequence child(s);
             child.insert(child.end(), source.begin(), source.end());
-            if (!admitted(child, phi, 't')) continue;
+            if (!admitted(child)) continue;
             Operation operation;
             operation.kind = 't';
             operation.source = static_cast<int>(k);
@@ -260,7 +252,6 @@ class StateSearch {
     const std::vector<Sequence>& sources_;
     const Sequence& target_;
     std::size_t n_;
-    Definition definition_;
     const JoinTable* joins_;
     Accounted accounted_;
 
@@ -278,14 +269,13 @@ Result nbfb_state_dist(const PreparedSources& sources,
                        const std::vector<int>& target,
                        bool want_history,
                        MemoryBudget& budget,
-                       Definition definition,
                        const JoinTable* foldback_first) {
     if (target.empty()) {
         Result result;
         result.reachable = true;
         return result;
     }
-    StateSearch search(sources, target, budget, definition, foldback_first);
+    StateSearch search(sources, target, budget, foldback_first);
     return search.solve(want_history);
 }
 

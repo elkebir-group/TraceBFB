@@ -14,15 +14,14 @@
 
 #include <vector>
 
-#include "nbfb_fast.hpp"
+#include "nbfb.hpp"
 
 namespace nbfb {
 
-// Same result conventions as nbfb_fast_dist: minimum first in fold-back-
-// shaped t-BFB joins (only with a JoinTable), then in t-BFB cycles, then in
-// total cycles. For a t-BFB cycle, Operation::source is the index of the
-// appended block among the given sources, or -1 if the block is not listed
-// verbatim. The fb_total fields are not filled.
+// Minimum first in fold-back-shaped t-BFB joins (only with a JoinTable),
+// then in t-BFB cycles, then in total cycles. For a t-BFB cycle,
+// Operation::source is the index of the appended block among the given
+// sources, or -1 if the block is not listed verbatim.
 Result nbfb_blocks_dist(const PreparedSources& sources,
                         const std::vector<int>& target,
                         bool want_history,

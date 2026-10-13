@@ -2,7 +2,7 @@
 
 Goal: an index-tuple search for `def:nested` with a provable O(n^4) bound.
 In `def:nested`, every string is `t[1,psi] y`, with `y` empty, the reverse
-complement of a substring of `t`, or a source. `nbfb --definition prefix`
+complement of a substring of `t`, or a source. `nbfb --string-search`
 (the string search) stays as the exact oracle for testing. The LCP-monotone
 class is dropped.
 
@@ -15,7 +15,7 @@ Rev. 4 replaces `t` by the g_i in rev. 3: `D = tbar # g_1 # ... # g_r #
 rc(g_r) # ... # rc(g_1)` (the code appends `# t` so that the text is its own
 reverse complement, and restricts occurrences to D). A covering source ends
 with the tail, so the tail is a substring of some g_i or rc(g_i). Case C
-appends a separator-free window of the g part. `nbfb --blocks` reads the
+appends a separator-free window of the g part. `nbfb` reads the
 source lines as the g_i (a file listing every block denotes the same S).
 
 Notation:

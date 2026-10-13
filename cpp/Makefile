@@ -2,24 +2,26 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra
 LDFLAGS ?= -pthread
 
+OBJECTS = nbfb_cli.o nbfb.o nbfb_blocks.o nbfb_state.o
+
 all: nbfb
 
-nbfb: nbfb_cli.o nbfb_fast.o nbfb_state.o nbfb_blocks.o
-	$(CXX) $(CXXFLAGS) -o $@ nbfb_cli.o nbfb_fast.o nbfb_state.o nbfb_blocks.o $(LDFLAGS)
+nbfb: $(OBJECTS)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJECTS) $(LDFLAGS)
 
-nbfb_cli.o: nbfb_cli.cpp nbfb_fast.hpp nbfb_state.hpp nbfb_blocks.hpp
+nbfb_cli.o: nbfb_cli.cpp nbfb.hpp nbfb_blocks.hpp nbfb_state.hpp
 	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_cli.cpp
 
-nbfb_fast.o: nbfb_fast.cpp nbfb_fast.hpp
-	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_fast.cpp
+nbfb.o: nbfb.cpp nbfb.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ nbfb.cpp
 
-nbfb_state.o: nbfb_state.cpp nbfb_state.hpp nbfb_fast.hpp
-	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_state.cpp
-
-nbfb_blocks.o: nbfb_blocks.cpp nbfb_blocks.hpp nbfb_fast.hpp
+nbfb_blocks.o: nbfb_blocks.cpp nbfb_blocks.hpp nbfb.hpp
 	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_blocks.cpp
 
+nbfb_state.o: nbfb_state.cpp nbfb_state.hpp nbfb.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ nbfb_state.cpp
+
 clean:
-	rm -f nbfb nbfb_cli.o nbfb_fast.o nbfb_state.o nbfb_blocks.o
+	rm -f nbfb $(OBJECTS) nbfb_fast.o
 
 .PHONY: all clean
