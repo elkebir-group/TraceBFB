@@ -120,3 +120,24 @@ Timings, one core:
 | HCC1395 chr6q minimal | 81 | 552 | 0.3 s | 63 s |
 | HCC1395 chr6q | 71 | 552 | 0.1 s | not run |
 | HCC1954 chr15q | 87 | 362 | 1.3 s | not run |
+
+# `lwalk`: longest walks of a breakpoint graph
+
+```
+lwalk GRAPH.txt [--starts LABEL,...] [--max-foldbacks] [--max-mem-gb G]          # count
+lwalk GRAPH.txt ... --enumerate -o PREFIX [--dedup-rc] [--max-walks N] [--chunk N]
+lwalk GRAPH.txt ... --sample N [--seed S] -o PREFIX [--dedup-rc]
+```
+
+A walk starts at a loose end of the graph and uses every segment at most its
+copy number and every bond at most its multiplicity. `lwalk` counts the longest
+walks exactly (128-bit), enumerates them, or samples them uniformly, by dynamic
+programming over (start, current node, remaining bond multiplicities). With
+`--max-foldbacks` it maximizes the number of fold-back junction traversals first
+and the length second. When the graph is the graph of one molecule, the longest
+walks are the walks that use every edge.
+
+`PREFIX.walks.txt` gets one walk per line as segment names (lower case for a
+reverse traversal) and `PREFIX.targets.txt` the same walks as `;`-joined tokens,
+the target format of `nbfb --targets`. `bfbdist.breakpoint_graph.BreakpointGraph.write_lwalk`
+writes `GRAPH.txt`.
