@@ -1,18 +1,18 @@
-# BFB-dist
+# BFBdist
 
-BFB-dist simulates breakage-fusion-bridge (BFB) histories over a set of
+BFBdist simulates breakage-fusion-bridge (BFB) histories over a set of
 source sequences and infers minimum-length histories that produce a target
 sequence.
 
 ## Installation
 
-BFB-dist requires Python 3.7 or newer and has no runtime dependencies.
+BFBdist requires Python 3.7 or newer and has no runtime dependencies.
 
 ```bash
 python -m pip install .
 ```
 
-This installs the `bfb-dist` command and the `bfb_dist` Python package.
+This installs the `bfbdist` command and the `bfb_dist` Python package.
 
 ## Model
 
@@ -53,7 +53,7 @@ the reference orientation and `C` the reverse-complement orientation.
 ### Simulate a history
 
 ```bash
-bfb-dist simulate \
+bfbdist simulate \
     --seed 11 \
     --n-sources 2 \
     --n-segments 5 \
@@ -72,7 +72,7 @@ preceding cycle added, which guarantees a nested history.
 The command creates:
 
 - `simulation.input`: the sources followed by the target, one per line,
-  ready for `bfb-dist distance`.
+  ready for `bfbdist distance`.
 - `simulation.paths`: the sequence after every cycle, one per line.
 - `simulation.paths.ansi`: the same sequences with ANSI coloring when
   `--colored` is supplied.
@@ -93,7 +93,7 @@ chr1:100-200[R];chr1:200-300[R];chr1:300-200[C];chr2:500-600[R]
 Then run:
 
 ```bash
-bfb-dist distance --input sequences.txt --out result --colored
+bfbdist distance --input sequences.txt --out result --colored
 ```
 
 The distance is printed to standard output. Pass `--mode` to select the

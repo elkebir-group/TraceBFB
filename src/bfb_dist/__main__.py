@@ -1,4 +1,4 @@
-"""Command-line interface for BFB-dist."""
+"""Command-line interface for BFBdist."""
 
 import argparse
 import sys
@@ -114,7 +114,7 @@ def handle_bfbdist(args):
 
 def main():
     """Parse command-line arguments and dispatch the selected command."""
-    parser = argparse.ArgumentParser(description="BFB-dist command line utility")
+    parser = argparse.ArgumentParser(description="BFBdist command line utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sim_parser = subparsers.add_parser("simulate")

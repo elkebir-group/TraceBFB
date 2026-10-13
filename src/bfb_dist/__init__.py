@@ -1,4 +1,4 @@
-"""Public Python API for BFB-dist."""
+"""Public Python API for BFBdist."""
 
 from bfb_dist.bfb_graph import BFBGraph
 from bfb_dist.distance import BFB_dist

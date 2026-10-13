@@ -183,7 +183,7 @@ class BFBGraph:
         return parse_state(child_text), Operation.from_fields(operation_fields)
 
     def write_text(self, output):
-        """Write the graph in BFB-dist adjacency-list format."""
+        """Write the graph in BFBdist adjacency-list format."""
         output.write(f"{self.target}\n")
         output.write("\t".join(map(str, self.sources)) + "\n")
         for node in sorted(self.adjacency, key=str):
