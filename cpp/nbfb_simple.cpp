@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace nbfb {
@@ -15,6 +16,17 @@ namespace nbfb {
 namespace {
 
 using Sequence = std::vector<int>;
+
+struct SequenceHash {
+    std::size_t operator()(const Sequence& sequence) const {
+        std::uint64_t h = 0x9e3779b97f4a7c15ull ^ sequence.size();
+        for (int value : sequence) {
+            h ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(value)) +
+                 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+        }
+        return static_cast<std::size_t>(h);
+    }
+};
 
 // ------------------------------------------------------------ hashing
 
@@ -177,6 +189,12 @@ struct Rope {
 constexpr std::uint32_t NO_PARENT = 0xffffffffu;
 constexpr std::int32_t NOT_FOLDED = -2;
 
+// Cost classes of chain edges: all edges of one chain add the same cost,
+// so the first offer of a class to a node is the best offer of the class.
+constexpr int FOLD = 0;           // p-, i- and f-cycles: (0, 0, 1)
+constexpr int APPEND = 1;         // t-cycles: (0, 1, 1)
+constexpr int APPEND_FOLDBACK = 2;  // fold-back-shaped t-cycles: (1, 1, 1)
+
 struct Node {
     std::uint32_t phi;   // longest common prefix with t
     std::uint32_t off;   // first occurrence of the tail in T
@@ -184,21 +202,23 @@ struct Node {
     Cost cost = INFINITE_COST;
     std::uint32_t parent = NO_PARENT;
     Operation operation;
-    // NOT_FOLDED until a p-, i- or f-cycle reaches the node. Afterwards
-    // every prefix of the node whose length lies strictly between jump and
-    // the length of the node has been reached by a p-, i- or f-cycle.
-    std::int32_t jump = NOT_FOLDED;
+    // Per cost class: NOT_FOLDED until a chain edge of the class reaches
+    // the node. Afterwards every prefix of the node whose length lies
+    // strictly between jump and the length of the node has been reached by
+    // a chain edge of the class.
+    std::int32_t jump[3] = {NOT_FOLDED, NOT_FOLDED, NOT_FOLDED};
     bool settled = false;
 };
 
 class SimpleSearch {
   public:
     SimpleSearch(const PreparedSources& sources, const Sequence& target,
-                 MemoryBudget& budget, const JoinTable* joins)
+                 MemoryBudget& budget, const JoinTable* joins, bool blocks)
         : sources_(sources.forward),
           target_(target),
           n_(static_cast<std::uint32_t>(target.size())),
           joins_(joins),
+          blocks_(blocks),
           accounted_(budget),
           windows_(accounted_),
           root_(accounted_),
@@ -214,7 +234,11 @@ class SimpleSearch {
         build_text();
         build_lce();
         build_windows();
-        build_sources();
+        if (blocks_) {
+            build_blocks();
+        } else {
+            build_sources();
+        }
         build_extensions();
     }
 
@@ -246,6 +270,17 @@ class SimpleSearch {
         }
         std::reverse(result.history.begin(), result.history.end());
         replay(result);
+        if (blocks_) {
+            // Index of the appended block among the source lines, or -1.
+            for (Operation& op : result.history) {
+                if (op.kind != 't') continue;
+                const Sequence block(text_.begin() + op.x, text_.begin() + op.x + op.y);
+                auto found = listed_.find(block);
+                op.source = found == listed_.end() ? -1 : found->second;
+                op.x = -1;
+                op.y = -1;
+            }
+        }
         if (!want_history) result.history.clear();
         return result;
     }
@@ -259,7 +294,62 @@ class SimpleSearch {
         text_.insert(text_.end(), target_.begin(), target_.end());
         text_.push_back(0);
         for (std::uint32_t a = n_; a > 0; --a) text_.push_back(-target_[a - 1]);
+        if (blocks_) {
+            // T = t # rc(t) # g_1 # rc(g_1) # ... # g_r # rc(g_r) for the
+            // maximal source lines g_1, ..., g_r.
+            for (const Sequence& g : maximal_sources()) {
+                const Sequence g_bar = reverse_complement(g);
+                for (const Sequence* line : {&g, &g_bar}) {
+                    text_.push_back(0);
+                    const std::uint32_t begin = static_cast<std::uint32_t>(text_.size());
+                    text_.insert(text_.end(), line->begin(), line->end());
+                    strings_.push_back({begin, static_cast<std::uint32_t>(text_.size())});
+                }
+            }
+        }
         accounted_.add(text_.size() * (sizeof(int) + 2 * sizeof(std::uint64_t)));
+    }
+
+    static Sequence reverse_complement(const Sequence& s) {
+        Sequence r(s.rbegin(), s.rend());
+        for (int& v : r) v = -v;
+        return r;
+    }
+
+    static bool occurs(const Sequence& text, const Sequence& pattern) {
+        return std::search(text.begin(), text.end(), pattern.begin(), pattern.end()) !=
+               text.end();
+    }
+
+    // The source lines, longest first, without every line that occurs in a
+    // kept line or in the reverse complement of a kept line. Their blocks
+    // and the reverse complements of the blocks are the source set.
+    std::vector<Sequence> maximal_sources() const {
+        std::vector<Sequence> all = sources_;
+        std::stable_sort(all.begin(), all.end(), [](const Sequence& l, const Sequence& r) {
+            return l.size() > r.size();
+        });
+        std::vector<Sequence> kept;
+        for (const Sequence& x : all) {
+            bool inside = false;
+            for (const Sequence& g : kept) {
+                if (occurs(g, x) || occurs(reverse_complement(g), x)) {
+                    inside = true;
+                    break;
+                }
+            }
+            if (!inside) kept.push_back(x);
+        }
+        return kept;
+    }
+
+    void build_blocks() {
+        std::size_t bytes = 0;
+        for (std::size_t k = 0; k < sources_.size(); ++k) {
+            bytes += sources_[k].size() * sizeof(int) + 64;
+            listed_.emplace(sources_[k], static_cast<int>(k));
+        }
+        accounted_.add(bytes);
     }
 
     void build_lce() {
@@ -637,7 +727,9 @@ class SimpleSearch {
                 slice_head();
                 Rope keep = w;
                 keep.append(head_bar);
-                chain(keep, length, high, b == length ? 'p' : 'i', b, id, fold);
+                const char kind = b == length ? 'p' : 'i';
+                chain(keep, length, high, FOLD, id, fold,
+                      [&](std::uint32_t l) { return fold_operation(kind, b, l - length); });
             }
 
             // f: P Q R -> P Q Rbar Qbar with Q = w[a, b), R = w[b, length).
@@ -654,7 +746,8 @@ class SimpleSearch {
                     Rope flip = head;
                     flip.append(reversed(slice(w, b, length)));
                     flip.append(head_bar);
-                    chain(flip, length, high, 'f', b, id, fold);
+                    chain(flip, length, high, FOLD, id, fold,
+                          [&](std::uint32_t l) { return fold_operation('f', b, l - length); });
                 }
             }
         }
@@ -675,7 +768,37 @@ class SimpleSearch {
             if (operation.foldback) cost.foldback += 1;
             walk(child, e, id, operation, cost);
         };
-        if (u.len == 0) {
+        if (blocks_) {
+            // Every block starting at position c of a string g of T is a
+            // prefix of the rest of g, so the children s x for these blocks
+            // are the prefixes of s g[c..] longer than s: one chain per
+            // start position.
+            const int last = length > 0 ? last_symbol(u) : 0;
+            for (const auto& [begin, end] : strings_) {
+                for (std::uint32_t c = begin; c < end && length < n_; ++c) {
+                    const int symbol = text_[c];
+                    if (std::abs(symbol) > symbols_ || !follows(symbol)) continue;
+                    const bool foldback = joins_ != nullptr && length > 0 &&
+                                          joins_->is_foldback(last, symbol);
+                    Cost cost = u.cost;
+                    cost.t += 1;
+                    cost.total += 1;
+                    if (foldback) cost.foldback += 1;
+                    Rope x = w;
+                    x.push(c, end - c);
+                    const std::uint32_t high = std::min(length + (end - c), n_);
+                    chain(x, length, high, foldback ? APPEND_FOLDBACK : APPEND, id, cost,
+                          [&](std::uint32_t l) {
+                              Operation operation;
+                              operation.kind = 't';
+                              operation.foldback = foldback;
+                              operation.x = static_cast<int>(c);
+                              operation.y = static_cast<int>(l - length);
+                              return operation;
+                          });
+                }
+            }
+        } else if (u.len == 0) {
             for (const auto& [symbol, child] : trie_[0].children) start(symbol, child);
         } else {
             for (std::uint32_t k = follow_from; k < follow_to; ++k) {
@@ -698,10 +821,21 @@ class SimpleSearch {
         }
     }
 
-    // Offers the children x[0, l) for l in (length, high] of node parent.
-    void chain(const Rope& x, std::uint32_t length, std::uint32_t high,
-               char kind, std::uint32_t b, std::uint32_t parent,
-               const Cost& cost) {
+    // The cycle P Q R -> ... with |P Q| = b and |Q| = gain.
+    static Operation fold_operation(char kind, std::uint32_t b, std::uint32_t gain) {
+        Operation operation;
+        operation.kind = kind;
+        operation.x = static_cast<int>(b - gain);
+        operation.y = static_cast<int>(b);
+        return operation;
+    }
+
+    // Offers the children x[0, l) for l in (length, high] of node parent,
+    // all with the given cost of the given class; make(l) is the cycle that
+    // produces x[0, l).
+    template <typename Make>
+    void chain(const Rope& x, std::uint32_t length, std::uint32_t high, int cls,
+               std::uint32_t parent, const Cost& cost, const Make& make) {
         const std::uint32_t phi_x = prefix_match(slice(x, 0, high));
         const std::uint32_t low = length + 1;
         if (prefix_node(x, phi_x, low, false) < 0) return;
@@ -727,20 +861,16 @@ class SimpleSearch {
             const std::uint32_t child =
                 static_cast<std::uint32_t>(prefix_node(x, phi_x, l, true));
             path_.push_back(child);
-            if (nodes_[child].jump == NOT_FOLDED) {
-                nodes_[child].jump = static_cast<std::int32_t>(l) - 1;
-                Operation operation;
-                operation.kind = kind;
-                operation.x = static_cast<int>(b - (l - length));
-                operation.y = static_cast<int>(b);
-                offer(child, cost, parent, operation);
+            if (nodes_[child].jump[cls] == NOT_FOLDED) {
+                nodes_[child].jump[cls] = static_cast<std::int32_t>(l) - 1;
+                offer(child, cost, parent, make(l));
                 at = l - 1;
             } else {
-                at = nodes_[child].jump;
+                at = nodes_[child].jump[cls];
             }
         }
         for (std::uint32_t child : path_) {
-            nodes_[child].jump = static_cast<std::int32_t>(at);
+            nodes_[child].jump[cls] = static_cast<std::int32_t>(at);
         }
     }
 
@@ -755,7 +885,7 @@ class SimpleSearch {
         for (const Operation& op : result.history) {
             const std::size_t length = s.size();
             if (op.kind == 't') {
-                const Sequence& x = sources_.at(static_cast<std::size_t>(op.source));
+                const Sequence x = appended(op);
                 const bool foldback = joins_ != nullptr && length > 0 &&
                                       joins_->is_foldback(s.back(), x.front());
                 if (foldback != op.foldback) fail("fold-back flag");
@@ -784,23 +914,46 @@ class SimpleSearch {
         }
     }
 
-    // Direct test of the definition of a foldable prefix.
+    // The string a t-cycle appends: a listed source, or in block mode a
+    // block T[x, x+y) inside one of the strings g or rc(g).
+    Sequence appended(const Operation& op) const {
+        if (!blocks_) return sources_.at(static_cast<std::size_t>(op.source));
+        const std::uint32_t begin = static_cast<std::uint32_t>(op.x);
+        const std::uint32_t end = begin + static_cast<std::uint32_t>(op.y);
+        bool inside = false;
+        for (const auto& [b, e] : strings_) inside |= b <= begin && begin < end && end <= e;
+        if (!inside) fail("appended block is not a source");
+        return Sequence(text_.begin() + begin, text_.begin() + end);
+    }
+
+    // Direct test of the definition of a foldable prefix: the tail after
+    // the longest common prefix with t, or its reverse complement, occurs
+    // in t.
     bool foldable(const Sequence& s) const {
         if (s.size() > n_) return false;
-        std::size_t phi = 0;
-        while (phi < s.size() && s[phi] == target_[phi]) ++phi;
-        const Sequence tail(s.begin() + phi, s.end());
-        if (tail.empty()) return true;
-        const Sequence tail_bar = [&] {
-            Sequence r(tail.rbegin(), tail.rend());
-            for (int& v : r) v = -v;
-            return r;
-        }();
-        auto contains = [&](const Sequence& y) {
-            return std::search(target_.begin(), target_.end(), y.begin(), y.end()) !=
-                   target_.end();
+        auto phi = s.begin();
+        auto at = target_.begin();
+        while (phi != s.end() && *phi == *at) {
+            ++phi;
+            ++at;
+        }
+        if (phi == s.end()) return true;
+        if (std::search(target_.begin(), target_.end(), phi, s.end()) != target_.end()) {
+            return true;
+        }
+        auto equal_bar = [&](Sequence::const_iterator start) {
+            auto back = s.end();
+            for (auto it = start; back != phi; ++it) {
+                --back;
+                if (*it != -*back) return false;
+            }
+            return true;
         };
-        return contains(tail) || contains(tail_bar);
+        const std::ptrdiff_t len = s.end() - phi;
+        for (auto start = target_.begin(); target_.end() - start >= len; ++start) {
+            if (equal_bar(start)) return true;
+        }
+        return false;
     }
 
     [[noreturn]] static void fail(const std::string& what) {
@@ -820,9 +973,14 @@ class SimpleSearch {
     const Sequence& target_;
     std::uint32_t n_;
     const JoinTable* joins_;
+    bool blocks_;
     Accounted accounted_;
 
     Sequence text_;
+    // Block mode: the strings g_k and rc(g_k) as [begin, end) ranges of T,
+    // and the index of every source line.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> strings_;
+    std::unordered_map<Sequence, int, SequenceHash> listed_;
     std::size_t width_ = 0;
     std::vector<std::uint16_t> lce_;
     std::uint64_t base_ = 0;
@@ -855,13 +1013,14 @@ Result nbfb_simple_dist(const PreparedSources& sources,
                         const std::vector<int>& target,
                         bool want_history,
                         MemoryBudget& budget,
-                        const JoinTable* foldback_first) {
+                        const JoinTable* foldback_first,
+                        bool blocks) {
     if (target.empty()) {
         Result result;
         result.reachable = true;
         return result;
     }
-    SimpleSearch search(sources, target, budget, foldback_first);
+    SimpleSearch search(sources, target, budget, foldback_first, blocks);
     return search.solve(want_history);
 }
 

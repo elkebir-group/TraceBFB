@@ -101,6 +101,7 @@ practical up to about a hundred segments.
 
 ```
 nbfb -i INSTANCE.txt --simple [--foldback-first] [--history]          # either mode
+nbfb -i INSTANCE.txt --simple --blocks [--foldback-first] [--history] # either mode
 nbfb -i INSTANCE.txt --simple --string-search [--foldback-first]      # reference
 ```
 
@@ -120,10 +121,21 @@ at the first prefix that is not foldable. The running time is
 `O(n^4 log n + n^3 |S|)`. With `--string-search`, the string search runs under
 the same definition. That is the exact reference for testing.
 
+With `--blocks`, the source set is every contiguous block of the source lines and
+the reverse complement of every such block, as for the default search. A file that
+lists every block explicitly therefore denotes the same set. The t-BFB children
+for one start position in a source line are prefixes of one string, so they form
+chains like the fold children, in `O(n^3 (n + K) log n)` time for `K` the total
+length of the maximal source lines. For a t-BFB cycle, `operations` gives the index
+of the appended block among the source lines, or `-1` if the block is not listed
+verbatim. `--blocks` and `--string-search` cannot be combined (list every block
+instead).
+
 | instance | n | sources | `--simple` | `--simple --string-search` |
 |---|---:|---:|---:|---:|
 | HCC1954 chr11q | 43 | 56 | 0.02 s | 1.4 s |
 | H1437 chr5p | 191 | 514 | 7.5 s | not run |
+| HCC1395 chr6q | 71 | 552 | 0.2 s (`--blocks`: 0.2 s) | 45 s |
 
 ## Memory
 

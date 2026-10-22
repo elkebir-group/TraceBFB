@@ -40,11 +40,21 @@ namespace nbfb {
 // Minimum first in fold-back-shaped t-BFB joins (only with a JoinTable),
 // then in t-BFB cycles, then in total cycles. For a t-BFB cycle,
 // Operation::source is the index of the appended source.
+//
+// With blocks, the source set is every contiguous block of the source lines
+// g_1, ..., g_r and the reverse complement of every such block (a file that
+// lists every block explicitly denotes the same set). For a t-BFB cycle,
+// Operation::source is then the index of the appended block among the
+// source lines, or -1 if the block is not listed verbatim. The t-BFB
+// children for a fixed start position in some g_k or rc(g_k) are the
+// prefixes of one string, so they form chains like the fold children, for
+// O(n^3 (n + K) log n) time with K the total length of the maximal lines.
 Result nbfb_simple_dist(const PreparedSources& sources,
                         const std::vector<int>& target,
                         bool want_history,
                         MemoryBudget& budget,
-                        const JoinTable* foldback_first = nullptr);
+                        const JoinTable* foldback_first = nullptr,
+                        bool blocks = false);
 
 }  // namespace nbfb
 

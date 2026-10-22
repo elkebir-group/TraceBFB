@@ -29,6 +29,9 @@
 //       with t, or its reverse complement, is a substring of t); see
 //       nbfb_simple.hpp. With --string-search, the string search under the
 //       same definition.
+//   --simple --blocks   (either mode)
+//       The same definition, with the sources being every contiguous block
+//       of the source lines and the reverse complement of every such block.
 
 #include "nbfb.hpp"
 #include "nbfb_blocks.hpp"
@@ -257,6 +260,7 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 // Set by --string-search and --simple.
 bool string_search = false;
 bool simple = false;
+bool simple_blocks = false;
 
 nbfb::Result solve(const nbfb::PreparedSources& sources,
                    const std::vector<int>& target, bool want_history,
@@ -267,7 +271,7 @@ nbfb::Result solve(const nbfb::PreparedSources& sources,
     }
     if (simple) {
         return nbfb::nbfb_simple_dist(sources, target, want_history, budget,
-                                      joins);
+                                      joins, simple_blocks);
     }
     return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
 }
@@ -458,7 +462,7 @@ void usage() {
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
            "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--string-search] [--simple]\n";
+           "[--string-search] [--simple [--blocks]]\n";
 }
 
 }  // namespace
@@ -516,6 +520,8 @@ int main(int argc, char** argv) {
             string_search = true;
         } else if (argument == "--simple") {
             simple = true;
+        } else if (argument == "--blocks") {
+            simple_blocks = true;
         } else if (argument == "-h" || argument == "--help") {
             usage();
             return 0;
@@ -531,6 +537,11 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (threads < 1) threads = 1;
+    if (simple_blocks && (!simple || string_search)) {
+        std::cerr << "Error: --blocks needs --simple and is not available "
+                     "with --string-search (list every block instead)\n";
+        return 2;
+    }
     nbfb::MemoryBudget budget(
         static_cast<std::size_t>(max_mem_gb * 1024.0 * 1024.0 * 1024.0));
 

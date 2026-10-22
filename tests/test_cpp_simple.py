@@ -1,6 +1,8 @@
 """The C++ general-source search (`cpp/nbfb --simple`) agrees with the C++
 string search under the same definition and with a brute-force search that
-applies the foldable-prefix definition literally."""
+applies the foldable-prefix definition literally. With `--blocks`, the
+search over all blocks of the source lines agrees with the general search
+over the explicit list of blocks."""
 
 import heapq
 import random
@@ -71,6 +73,18 @@ def brute(sources, t, foldback_first):
     return None
 
 
+def blocks(strings):
+    """Every block of every string, in both orientations, once each."""
+    out = []
+    for s in strings:
+        for i in range(len(s)):
+            for j in range(i + 1, len(s) + 1):
+                for b in (s[i:j], rc(s[i:j])):
+                    if b not in out:
+                        out.append(b)
+    return out
+
+
 def random_instance(rng):
     alphabet = "ABCDabcd"
     sources = ["".join(rng.choice(alphabet) for _ in range(rng.randint(1, 3)))
@@ -128,6 +142,25 @@ class CppSimpleSearchTests(unittest.TestCase):
                         self.assertEqual(
                             self.run_nbfb(path, "--simple", "--string-search", *flags),
                             expected)
+
+    def test_block_search_matches_brute_force_over_all_blocks(self):
+        rng = random.Random(11)
+        with tempfile.TemporaryDirectory() as directory:
+            given = Path(directory) / "given.txt"
+            closed = Path(directory) / "closed.txt"
+            for _ in range(60):
+                strings, t = random_instance(rng)
+                given.write_text("\n".join(map(line, strings + [t])) + "\n")
+                closed.write_text("\n".join(map(line, blocks(strings) + [t])) + "\n")
+                for foldback_first in (False, True):
+                    flags = ["--foldback-first"] if foldback_first else []
+                    with self.subTest(strings=strings, t=t, flags=flags):
+                        expected = brute(blocks(strings), t, foldback_first)
+                        if expected is not None and not foldback_first:
+                            expected = (0,) + expected[1:]
+                        self.assertEqual(
+                            self.run_nbfb(given, "--simple", "--blocks", *flags), expected)
+                        self.assertEqual(self.run_nbfb(closed, "--simple", *flags), expected)
 
 
 if __name__ == "__main__":
