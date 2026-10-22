@@ -9,9 +9,13 @@ point, for O(n^4) time in the worst case. `PREFIX_FAST_DESIGN.md` gives the rule
 The answer is minimum first in t-BFB cycles and then in total cycles, or
 fold-back-first with `--foldback-first`.
 
+With `--simple`, the tool instead takes the sources exactly as listed and uses
+the foldable-prefix definition of nestedness (see below).
+
 No external dependencies. The library is `nbfb.hpp/.cpp` (shared types),
-`nbfb_blocks.hpp/.cpp` (the search) and `nbfb_state.hpp/.cpp` (the reference
-string search). The command-line tool is `nbfb_cli.cpp`.
+`nbfb_blocks.hpp/.cpp` (the block search), `nbfb_simple.hpp/.cpp` (the
+general-source search) and `nbfb_state.hpp/.cpp` (the reference string
+search). The command-line tool is `nbfb_cli.cpp`.
 
 ## Build
 
@@ -92,6 +96,34 @@ the string, with every cycle enumerated (`nbfb_state.cpp`). It takes the sources
 exactly as listed, with no closure under substrings, so a comparison needs an
 instance that lists every block. It is the exact reference for testing and is
 practical up to about a hundred segments.
+
+### General sources and foldable prefixes (`--simple`)
+
+```
+nbfb -i INSTANCE.txt --simple [--foldback-first] [--history]          # either mode
+nbfb -i INSTANCE.txt --simple --string-search [--foldback-first]      # reference
+```
+
+The sources are taken exactly as listed, with no closure under substrings. A
+string `s` is a foldable prefix of `t` if `s = x y`, where `x` is a prefix of
+`t` and `y` or `rc(y)` is a substring of `t`. A history is nested if every
+string of the history is a foldable prefix of `t`. The objective is the same as
+for the other searches: minimum t-BFB cycles then total cycles, or
+fold-back-first with `--foldback-first`.
+
+The search (`nbfb_simple.cpp`) is a Dijkstra search over the foldable prefixes.
+For a fixed cut point, the p-, i- or f-children of a node are the prefixes of one
+string in a range of lengths. A binary search finds the children that are
+foldable, and union-find pointers skip the children that an earlier fold already
+reached. The t-BFB children come from a walk over a trie of the sources, pruned
+at the first prefix that is not foldable. The running time is
+`O(n^4 log n + n^3 |S|)`. With `--string-search`, the string search runs under
+the same definition. That is the exact reference for testing.
+
+| instance | n | sources | `--simple` | `--simple --string-search` |
+|---|---:|---:|---:|---:|
+| HCC1954 chr11q | 43 | 56 | 0.02 s | 1.4 s |
+| H1437 chr5p | 191 | 514 | 7.5 s | not run |
 
 ## Memory
 

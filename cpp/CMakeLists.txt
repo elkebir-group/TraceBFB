@@ -12,7 +12,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
 find_package(Threads REQUIRED)
 
-add_library(nbfb_lib STATIC nbfb.cpp nbfb_blocks.cpp nbfb_state.cpp)
+add_library(nbfb_lib STATIC nbfb.cpp nbfb_blocks.cpp nbfb_simple.cpp nbfb_state.cpp)
 target_include_directories(nbfb_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(nbfb_lib PRIVATE -Wall -Wextra)
 

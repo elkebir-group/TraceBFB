@@ -21,12 +21,16 @@ namespace nbfb {
 
 // Minimum first in fold-back-shaped t-BFB joins (only with a JoinTable),
 // then in t-BFB cycles, then in total cycles. The sources are taken as
-// given (no closure under substrings).
+// given (no closure under substrings). With foldable_only, every produced
+// string must instead be a foldable prefix of t: t[1,psi] y with y or the
+// reverse complement of y a substring of t (no source case). This is the
+// reference for nbfb_simple_dist.
 Result nbfb_state_dist(const PreparedSources& sources,
                        const std::vector<int>& target,
                        bool want_history,
                        MemoryBudget& budget,
-                       const JoinTable* foldback_first = nullptr);
+                       const JoinTable* foldback_first = nullptr,
+                       bool foldable_only = false);
 
 }  // namespace nbfb
 

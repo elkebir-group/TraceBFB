@@ -76,11 +76,13 @@ class Accounted {
 class StateSearch {
   public:
     StateSearch(const PreparedSources& sources, const Sequence& target,
-                MemoryBudget& budget, const JoinTable* joins)
+                MemoryBudget& budget, const JoinTable* joins,
+                bool foldable_only)
         : sources_(sources.forward),
           target_(target),
           n_(target.size()),
           joins_(joins),
+          foldable_only_(foldable_only),
           accounted_(budget) {
         for (const Sequence& source : sources_) {
             if (source.empty()) {
@@ -101,6 +103,15 @@ class StateSearch {
         for (std::size_t a = 0; a < n_; ++a) {
             for (std::size_t b = a + 1; b <= n_; ++b) {
                 window_set_.emplace(tbar.begin() + a, tbar.begin() + b);
+            }
+        }
+        // With foldable_only, a tail may also occur in t itself.
+        if (foldable_only_) {
+            accounted_.add(n_ * n_ * (sizeof(int) * (n_ + 2) / 2 + 48));
+            for (std::size_t a = 0; a < n_; ++a) {
+                for (std::size_t b = a + 1; b <= n_; ++b) {
+                    window_set_.emplace(target_.begin() + a, target_.begin() + b);
+                }
             }
         }
     }
@@ -154,6 +165,7 @@ class StateSearch {
     // cases are tested at psi = phi.
     bool nice(const Sequence& sequence, std::size_t phi) const {
         if (foldable(sequence, phi)) return true;
+        if (foldable_only_) return false;
         for (std::size_t length : source_lengths_) {
             if (length > sequence.size()) break;
             if (sequence.size() - length > phi) continue;
@@ -253,6 +265,7 @@ class StateSearch {
     const Sequence& target_;
     std::size_t n_;
     const JoinTable* joins_;
+    bool foldable_only_;
     Accounted accounted_;
 
     std::unordered_set<Sequence, SequenceHash> source_set_;
@@ -269,13 +282,14 @@ Result nbfb_state_dist(const PreparedSources& sources,
                        const std::vector<int>& target,
                        bool want_history,
                        MemoryBudget& budget,
-                       const JoinTable* foldback_first) {
+                       const JoinTable* foldback_first,
+                       bool foldable_only) {
     if (target.empty()) {
         Result result;
         result.reachable = true;
         return result;
     }
-    StateSearch search(sources, target, budget, foldback_first);
+    StateSearch search(sources, target, budget, foldback_first, foldable_only);
     return search.solve(want_history);
 }
 

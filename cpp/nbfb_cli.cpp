@@ -23,9 +23,16 @@
 //       Use the direct search over strings of nbfb_state.hpp, with the
 //       sources taken exactly as listed (no closure under substrings). The
 //       exact reference for testing; O(n^2) cycles per node.
+//   --simple   (either mode)
+//       Take the sources exactly as listed and use the foldable-prefix
+//       definition of nestedness (the tail after the longest common prefix
+//       with t, or its reverse complement, is a substring of t); see
+//       nbfb_simple.hpp. With --string-search, the string search under the
+//       same definition.
 
 #include "nbfb.hpp"
 #include "nbfb_blocks.hpp"
+#include "nbfb_simple.hpp"
 #include "nbfb_state.hpp"
 
 #include <algorithm>
@@ -247,15 +254,20 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 
 // -------------------------------------------------------------- modes
 
-// Set by --string-search.
+// Set by --string-search and --simple.
 bool string_search = false;
+bool simple = false;
 
 nbfb::Result solve(const nbfb::PreparedSources& sources,
                    const std::vector<int>& target, bool want_history,
                    nbfb::MemoryBudget& budget, const nbfb::JoinTable* joins) {
     if (string_search) {
         return nbfb::nbfb_state_dist(sources, target, want_history, budget,
-                                     joins);
+                                     joins, simple);
+    }
+    if (simple) {
+        return nbfb::nbfb_simple_dist(sources, target, want_history, budget,
+                                      joins);
     }
     return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
 }
@@ -446,7 +458,7 @@ void usage() {
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
            "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--string-search]\n";
+           "[--string-search] [--simple]\n";
 }
 
 }  // namespace
@@ -502,6 +514,8 @@ int main(int argc, char** argv) {
             }
         } else if (argument == "--string-search") {
             string_search = true;
+        } else if (argument == "--simple") {
+            simple = true;
         } else if (argument == "-h" || argument == "--help") {
             usage();
             return 0;

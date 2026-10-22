@@ -1,0 +1,51 @@
+// Nested BFB distance over a general source set.
+//
+// A string s is a foldable prefix of the target t if s = x y, where x is a
+// prefix of t and y or the reverse complement of y is a substring of t. A
+// history is nested if every string of the history is a foldable prefix of
+// t. The sources are taken exactly as listed (no closure under substrings).
+//
+// The search is a Dijkstra search over the foldable prefixes of t under the
+// lexicographic cost. A node is stored as t[1,phi] T[c,c+l), where
+// T = t # rc(t), phi is the longest common prefix of the node and t, and
+// T[c,c+l) is the first occurrence of the tail in T.
+//
+// p-, i- and f-cycles: for a fixed cut point b, the children of a node w
+// are the prefixes, in a range of lengths, of one string X (w rc(w[1,b])
+// for p and i, w[1,b] rc(w[b+1,|w|]) rc(w[1,b]) for f). Foldable prefixes
+// are closed under taking prefixes, so a binary search finds the children
+// that are nodes. All these cycles cost the same, so the first time a fold
+// reaches a node is the best fold offer, and union-find pointers over
+// prefix lengths skip the children that a fold already reached. Two exact
+// necessary conditions skip most chains before the binary search.
+//
+// t-cycles: a trie of the sources is walked from w and pruned at the
+// first prefix that is not a foldable prefix.
+//
+// String equality is tested through hashing, and every hash match is
+// confirmed by an exact comparison, so results do not depend on the hash.
+// Every returned history is replayed on strings before it is reported.
+// The running time is O(n^4 log n + n^3 |S|) for n = |t|, up to the trie
+// walk; the memory is O(n^2) for the tables plus O(1) per reached node.
+
+#ifndef NBFB_SIMPLE_HPP
+#define NBFB_SIMPLE_HPP
+
+#include <vector>
+
+#include "nbfb.hpp"
+
+namespace nbfb {
+
+// Minimum first in fold-back-shaped t-BFB joins (only with a JoinTable),
+// then in t-BFB cycles, then in total cycles. For a t-BFB cycle,
+// Operation::source is the index of the appended source.
+Result nbfb_simple_dist(const PreparedSources& sources,
+                        const std::vector<int>& target,
+                        bool want_history,
+                        MemoryBudget& budget,
+                        const JoinTable* foldback_first = nullptr);
+
+}  // namespace nbfb
+
+#endif  // NBFB_SIMPLE_HPP
