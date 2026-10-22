@@ -1,4 +1,4 @@
-// Command-line front end for the nested BFB distance.
+// Command-line front end for the nested BFB distance (nbfb_simple.hpp).
 //
 //   nbfb -i INSTANCE.txt [--history]
 //       One source per line, the target on the last line, in the format of
@@ -9,41 +9,32 @@
 //       One shared source set and one target per line. Prints one TSV row
 //       per target.
 //
-//   The sources are all contiguous substrings of the source lines and
-//   their reverse complements (a file listing every block denotes the same
-//   set); see nbfb_blocks.hpp.
+//   Nestedness is the foldable-prefix definition: every string of the
+//   history is t[1,psi] y with y or the reverse complement of y a
+//   substring of t.
 //
-//   --foldback-first [--foldback-span BP|any]   (either mode)
+//   --blocks (default) | --general   (either mode)
+//       The sources are every contiguous block of the source lines and the
+//       reverse complement of every such block (a file listing every block
+//       denotes the same set), or the source lines exactly as listed.
+//   --foldback-first (default) | --no-foldback-first   (either mode)
 //       Minimize first the number of t-BFB cycles whose join is
-//       fold-back-shaped: the segment before the join and the first segment
+//       fold-back-shaped (the segment before the join and the first segment
 //       of the appended source lie on the same chromosome in opposite
-//       orientations, with breakpoints at most BP apart (default 50000).
-//       Adds a foldback_t line / column; such cycles print as 'T'.
-//   --string-search   (either mode)
-//       Use the direct search over strings of nbfb_state.hpp, with the
-//       sources taken exactly as listed (no closure under substrings). The
-//       exact reference for testing; O(n^2) cycles per node.
-//   --simple   (either mode)
-//       Take the sources exactly as listed and use the foldable-prefix
-//       definition of nestedness (the tail after the longest common prefix
-//       with t, or its reverse complement, is a substring of t); see
-//       nbfb_simple.hpp. With --string-search, the string search under the
-//       same definition.
-//   --simple ... --all-optimal [--max-histories N]   (either mode)
+//       orientations, with breakpoints at most --foldback-span BP apart,
+//       default 50000, or 'any'), then t-BFB cycles, then all cycles. Such
+//       cycles print as 'T'. --no-foldback-first minimizes t-BFB cycles,
+//       then all cycles.
+//   --all-optimal [--max-histories N]   (either mode)
 //       Also count every optimal history (same strings and cycle types =
 //       same history) and list them, at most N (default: all). Single
 //       mode: an optimal_histories line and one "optimal:" line per history
 //       (types, tab, operations) before the distance. Batch mode: an
 //       optimal_histories column, and with --history an all_ops column with
 //       the histories separated by '|'.
-//   --simple --blocks   (either mode)
-//       The same definition, with the sources being every contiguous block
-//       of the source lines and the reverse complement of every such block.
 
 #include "nbfb.hpp"
-#include "nbfb_blocks.hpp"
 #include "nbfb_simple.hpp"
-#include "nbfb_state.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -264,26 +255,16 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 
 // -------------------------------------------------------------- modes
 
-// Set by --string-search and --simple.
-bool string_search = false;
-bool simple = false;
-bool simple_blocks = false;
+// Set by --blocks / --general and --all-optimal.
+bool blocks = true;
 bool all_optimal = false;
 std::size_t max_histories = static_cast<std::size_t>(-1);
 
 nbfb::Result solve(const nbfb::PreparedSources& sources,
                    const std::vector<int>& target, bool want_history,
                    nbfb::MemoryBudget& budget, const nbfb::JoinTable* joins) {
-    if (string_search) {
-        return nbfb::nbfb_state_dist(sources, target, want_history, budget,
-                                     joins, simple);
-    }
-    if (simple) {
-        return nbfb::nbfb_simple_dist(sources, target, want_history, budget,
-                                      joins, simple_blocks, all_optimal,
-                                      max_histories);
-    }
-    return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
+    return nbfb::nbfb_simple_dist(sources, target, want_history, budget, joins,
+                                  blocks, all_optimal, max_histories);
 }
 
 int run_single(const std::string& path, bool want_history,
@@ -491,9 +472,9 @@ void usage() {
         << "usage: nbfb -i INSTANCE.txt [--history] [--max-mem-gb G]\n"
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
-           "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--string-search] [--simple [--blocks] [--all-optimal "
-           "[--max-histories N]]]\n";
+           "       either form: [--blocks | --general] "
+           "[--foldback-first | --no-foldback-first] [--foldback-span BP|any] "
+           "[--all-optimal [--max-histories N]]\n";
 }
 
 }  // namespace
@@ -506,7 +487,7 @@ int main(int argc, char** argv) {
     int threads = 1;
     bool want_history = false;
     double max_mem_gb = 2.0;
-    bool foldback_first = false;
+    bool foldback_first = true;
     long long foldback_span = 50000;
 
     for (int i = 1; i < argc; ++i) {
@@ -534,6 +515,8 @@ int main(int argc, char** argv) {
             max_mem_gb = std::atof(value("--max-mem-gb").c_str());
         } else if (argument == "--foldback-first") {
             foldback_first = true;
+        } else if (argument == "--no-foldback-first") {
+            foldback_first = false;
         } else if (argument == "--foldback-span") {
             const std::string span = value("--foldback-span");
             if (span == "any") {
@@ -547,12 +530,10 @@ int main(int argc, char** argv) {
                     return 2;
                 }
             }
-        } else if (argument == "--string-search") {
-            string_search = true;
-        } else if (argument == "--simple") {
-            simple = true;
         } else if (argument == "--blocks") {
-            simple_blocks = true;
+            blocks = true;
+        } else if (argument == "--general") {
+            blocks = false;
         } else if (argument == "--all-optimal") {
             all_optimal = true;
         } else if (argument == "--max-histories") {
@@ -573,15 +554,6 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (threads < 1) threads = 1;
-    if (all_optimal && (!simple || string_search)) {
-        std::cerr << "Error: --all-optimal needs --simple without --string-search\n";
-        return 2;
-    }
-    if (simple_blocks && (!simple || string_search)) {
-        std::cerr << "Error: --blocks needs --simple and is not available "
-                     "with --string-search (list every block instead)\n";
-        return 2;
-    }
     nbfb::MemoryBudget budget(
         static_cast<std::size_t>(max_mem_gb * 1024.0 * 1024.0 * 1024.0));
 

@@ -1,10 +1,10 @@
-"""The C++ general-source search (`cpp/nbfb --simple`) agrees with the C++
-string search under the same definition and with a brute-force search that
-applies the foldable-prefix definition literally. With `--blocks`, the
-search over all blocks of the source lines agrees with the general search
-over the explicit list of blocks. With `--all-optimal`, both list exactly
-the optimal histories of a brute-force enumeration (a history is its
-strings and cycle types)."""
+"""The C++ search (`cpp/nbfb`) agrees with a brute-force search that applies
+the foldable-prefix definition literally: with `--general` (the source lines
+as listed) and with `--blocks` (every block of the source lines, the default),
+under both objectives (`--foldback-first`, the default, and
+`--no-foldback-first`). With `--all-optimal`, both list exactly the optimal
+histories of a brute-force enumeration (a history is its strings and cycle
+types)."""
 
 import heapq
 import random
@@ -194,7 +194,7 @@ class CppSimpleSearchTests(unittest.TestCase):
             return None
         return (int(fields.get("foldback_t", 0)), int(fields["t_cycles"]), int(lines[-1]))
 
-    def test_simple_search_matches_brute_force_and_string_search(self):
+    def test_general_search_matches_brute_force(self):
         rng = random.Random(7)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "instance.txt"
@@ -202,15 +202,12 @@ class CppSimpleSearchTests(unittest.TestCase):
                 sources, t = random_instance(rng)
                 path.write_text("\n".join(map(line, sources + [t])) + "\n")
                 for foldback_first in (False, True):
-                    flags = ["--foldback-first"] if foldback_first else []
+                    flags = [] if foldback_first else ["--no-foldback-first"]
                     with self.subTest(sources=sources, t=t, flags=flags):
                         expected = brute(sources, t, foldback_first)
                         if expected is not None and not foldback_first:
                             expected = (0,) + expected[1:]
-                        self.assertEqual(self.run_nbfb(path, "--simple", *flags), expected)
-                        self.assertEqual(
-                            self.run_nbfb(path, "--simple", "--string-search", *flags),
-                            expected)
+                        self.assertEqual(self.run_nbfb(path, "--general", *flags), expected)
 
     def test_block_search_matches_brute_force_over_all_blocks(self):
         rng = random.Random(11)
@@ -222,18 +219,19 @@ class CppSimpleSearchTests(unittest.TestCase):
                 given.write_text("\n".join(map(line, strings + [t])) + "\n")
                 closed.write_text("\n".join(map(line, blocks(strings) + [t])) + "\n")
                 for foldback_first in (False, True):
-                    flags = ["--foldback-first"] if foldback_first else []
+                    flags = [] if foldback_first else ["--no-foldback-first"]
                     with self.subTest(strings=strings, t=t, flags=flags):
                         expected = brute(blocks(strings), t, foldback_first)
                         if expected is not None and not foldback_first:
                             expected = (0,) + expected[1:]
                         self.assertEqual(
-                            self.run_nbfb(given, "--simple", "--blocks", *flags), expected)
-                        self.assertEqual(self.run_nbfb(closed, "--simple", *flags), expected)
+                            self.run_nbfb(given, *flags), expected)
+                        self.assertEqual(self.run_nbfb(given, "--blocks", *flags), expected)
+                        self.assertEqual(self.run_nbfb(closed, "--general", *flags), expected)
 
     def run_all_optimal(self, path, sources, *flags):
         result = subprocess.run(
-            [str(CPP / "nbfb"), "-i", str(path), "--simple", "--all-optimal",
+            [str(CPP / "nbfb"), "-i", str(path), "--all-optimal",
              "--max-mem-gb", "1", *flags],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             universal_newlines=True, check=True)
@@ -253,10 +251,10 @@ class CppSimpleSearchTests(unittest.TestCase):
                 given.write_text("\n".join(map(line, strings + [t])) + "\n")
                 closed.write_text("\n".join(map(line, every + [t])) + "\n")
                 for foldback_first in (False, True):
-                    flags = ["--foldback-first"] if foldback_first else []
+                    flags = [] if foldback_first else ["--no-foldback-first"]
                     with self.subTest(strings=strings, t=t, flags=flags):
                         expected = all_optimal(strings, t, foldback_first)
-                        count, listed = self.run_all_optimal(given, strings, *flags)
+                        count, listed = self.run_all_optimal(given, strings, "--general", *flags)
                         self.assertEqual(count, len(expected))
                         self.assertEqual(len(listed), len(set(listed)))
                         self.assertEqual(set(listed), expected)

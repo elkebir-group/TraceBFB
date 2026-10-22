@@ -102,9 +102,12 @@ history class and algorithm:
 - `--mode bfb` (default): the general BFB distance, by backward search from
   the target. Exponential time.
 - `--mode nbfb`: the NBFB distance, by breadth-first search over the NBFB
-  graph. Returns every optimal nested history. For large instances use the
-  C++ tool in `cpp/` (`nbfb`), which runs in `O(n^4)` time when the sources
-  are all blocks of a few strings.
+  graph. Returns every optimal nested history. This mode uses the older
+  nested definition of the Model section. The C++ tool in `cpp/` (`nbfb`)
+  uses the foldable-prefix definition (the tail after the longest common
+  prefix with the target, or its reverse complement, is a substring of the
+  target), the fold-back-first objective, and polynomial time; see
+  `cpp/README.md`.
 
 The command creates:
 
