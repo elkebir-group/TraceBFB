@@ -25,6 +25,13 @@
 //       default 50000, or 'any'), then t-BFB cycles, then all cycles. Such
 //       cycles print as 'T'. --no-foldback-first minimizes t-BFB cycles,
 //       then all cycles.
+//   --string-mode   (either mode)
+//       The sources and targets are strings of letters instead of segments:
+//       every character is one segment, an upper-case letter forward and
+//       the lower-case letter its reverse complement (ABCcb). The letters lie
+//       on one chromosome without coordinates, so a join is fold-back-shaped
+//       exactly when its two letters have opposite case (--foldback-span is
+//       ignored). Everything else is unchanged.
 //   --all-optimal [--max-histories N]   (either mode)
 //       Also count every optimal history (same strings and cycle types =
 //       same history) and list them, at most N (default: all). Single
@@ -39,6 +46,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -62,6 +70,9 @@ namespace {
 // reversing the order and negating every identifier.
 class SegmentInterner {
   public:
+    // letters: --string-mode, one segment per character (see below).
+    explicit SegmentInterner(bool letters) : letters_(letters) {}
+
     int id(const std::string& token) {
         std::string chromosome;
         long long start = 0;
@@ -90,6 +101,7 @@ class SegmentInterner {
     // chromosome, opposite orientations, and the coordinate where u is left
     // within span bp of the coordinate where v is entered (span < 0: any).
     nbfb::JoinTable join_table(long long span) const {
+        if (letters_) return letter_join_table();
         nbfb::JoinTable joins;
         joins.max_id = next_;
         const std::size_t width = 2 * static_cast<std::size_t>(next_) + 1;
@@ -114,6 +126,7 @@ class SegmentInterner {
     }
 
     std::vector<int> sequence(const std::string& line) {
+        if (letters_) return letter_sequence(line);
         std::vector<int> result;
         std::size_t begin = 0;
         while (true) {
@@ -201,6 +214,45 @@ class SegmentInterner {
     std::unordered_map<std::string, int> table_;
     std::vector<Geometry> geometry_;  // orientation of each positive id
     int next_ = 0;
+    bool letters_ = false;
+
+    // --string-mode: every character of a line is one segment, an upper-case
+    // letter X forward and the lower-case x its reverse complement, so X has
+    // identifier X - 'A' + 1 and x the negation. Blanks are skipped.
+    static std::vector<int> letter_sequence(const std::string& line) {
+        std::vector<int> result;
+        for (char c : line) {
+            if (std::isspace(static_cast<unsigned char>(c))) continue;
+            if (c >= 'A' && c <= 'Z') {
+                result.push_back(c - 'A' + 1);
+            } else if (c >= 'a' && c <= 'z') {
+                result.push_back(-(c - 'a' + 1));
+            } else {
+                throw std::invalid_argument(
+                    std::string("invalid character '") + c +
+                    "' in --string-mode (letters A-Z and a-z only)");
+            }
+        }
+        return result;
+    }
+
+    // --string-mode: the letters carry no coordinates and lie on one
+    // chromosome, so a join u -> v is fold-back-shaped exactly when u and v
+    // have opposite orientations (opposite case).
+    static nbfb::JoinTable letter_join_table() {
+        nbfb::JoinTable joins;
+        joins.max_id = 26;
+        const std::size_t width = 2 * 26 + 1;
+        joins.foldback.assign(width * width, 0);
+        for (int u = -26; u <= 26; ++u) {
+            for (int v = -26; v <= 26; ++v) {
+                if (u == 0 || v == 0 || (u > 0) == (v > 0)) continue;
+                joins.foldback[static_cast<std::size_t>(u + 26) * width +
+                               static_cast<std::size_t>(v + 26)] = 1;
+            }
+        }
+        return joins;
+    }
 };
 
 std::vector<std::string> read_lines(const std::string& path) {
@@ -255,8 +307,9 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 
 // -------------------------------------------------------------- modes
 
-// Set by --blocks / --general and --all-optimal.
+// Set by --blocks / --general, --all-optimal and --string-mode.
 bool blocks = true;
+bool string_mode = false;
 bool all_optimal = false;
 std::size_t max_histories = static_cast<std::size_t>(-1);
 
@@ -280,7 +333,7 @@ int run_single(const std::string& path, bool want_history,
                      "followed by the target, one nonempty sequence per line\n";
         return 2;
     }
-    SegmentInterner interner;
+    SegmentInterner interner(string_mode);
     std::vector<std::vector<int>> sources;
     for (std::size_t i = 0; i + 1 < lines.size(); ++i) {
         sources.push_back(interner.sequence(lines[i]));
@@ -347,7 +400,7 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
               int threads, const std::string& out_path, bool want_history,
               nbfb::MemoryBudget& budget, bool foldback_first,
               long long foldback_span) {
-    SegmentInterner interner;
+    SegmentInterner interner(string_mode);
     std::vector<std::vector<int>> sources;
     for (const std::string& line : read_lines(sources_path)) {
         if (blank(line)) continue;
@@ -474,7 +527,7 @@ void usage() {
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
            "       either form: [--blocks | --general] "
            "[--foldback-first | --no-foldback-first] [--foldback-span BP|any] "
-           "[--all-optimal [--max-histories N]]\n";
+           "[--all-optimal [--max-histories N]] [--string-mode]\n";
 }
 
 }  // namespace
@@ -534,6 +587,8 @@ int main(int argc, char** argv) {
             blocks = true;
         } else if (argument == "--general") {
             blocks = false;
+        } else if (argument == "--string-mode") {
+            string_mode = true;
         } else if (argument == "--all-optimal") {
             all_optimal = true;
         } else if (argument == "--max-histories") {

@@ -32,6 +32,14 @@ are joined by `;` and written `chr0:1000-1900[R]` (forward) or `chr0:1900-1000[C
 (reverse complement). In batch mode every line of `T.txt` is a target over the
 shared sources of `S.txt`.
 
+With `--string-mode`, every line is instead a string of letters, one segment per
+character: an upper-case letter is forward and the lower-case letter its reverse
+complement, so `ABCcb` is A, B, C followed by C and B reversed. Blanks are
+ignored, and any other character is an error. The letters carry no coordinates
+and lie on one chromosome, so a join is fold-back-shaped exactly when its two
+letters have opposite case (`--foldback-span` is ignored). The search, its
+nestedness definition and every other option are unchanged.
+
 | option | meaning |
 |---|---|
 | `--blocks` (default) | sources = every contiguous block of the source lines and its reverse complement (a file listing every block denotes the same set) |
@@ -39,6 +47,7 @@ shared sources of `S.txt`.
 | `--foldback-first` (default) | minimize fold-back-shaped t-BFB joins, then t-BFB cycles, then all cycles |
 | `--no-foldback-first` | minimize t-BFB cycles, then all cycles |
 | `--foldback-span BP\|any` | a join `u -> v` is fold-back-shaped when both segments lie on the same chromosome in opposite orientations with breakpoints at most `BP` apart (default 50,000; `any` drops the distance test) |
+| `--string-mode` | read sources and targets as strings of letters (see above) |
 | `--history` | print one optimal history |
 | `--all-optimal [--max-histories N]` | count every optimal history exactly and list them, at most `N` (default: all) |
 | `--max-mem-gb G` | memory budget for the whole process (default 2); exceeding it stops with exit status 3 |

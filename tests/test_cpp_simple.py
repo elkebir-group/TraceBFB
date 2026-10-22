@@ -265,6 +265,41 @@ class CppSimpleSearchTests(unittest.TestCase):
                         self.assertEqual(count, len(expected))
                         self.assertEqual(set(listed), expected)
 
+    def test_string_mode_matches_segment_input(self):
+        # --string-mode reads one letter per segment, and a join is fold-back-
+        # shaped when the letters have opposite case. The same instance in
+        # segment format, with every letter on chr1 within 50 kb, must give
+        # the same answers under every option.
+        def chr1_line(text):
+            return ";".join(
+                f"chr1:{10 * (ord(c.upper()) - 64)}-{10 * (ord(c.upper()) - 64) + 9}[R]"
+                if c.isupper() else
+                f"chr1:{10 * (ord(c.upper()) - 64) + 9}-{10 * (ord(c.upper()) - 64)}[C]"
+                for c in text)
+
+        def answer(path, *flags):
+            result = subprocess.run(
+                [str(CPP / "nbfb"), "-i", str(path), "--history", "--all-optimal",
+                 "--max-histories", "0", "--max-mem-gb", "1", *flags],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True, check=True)
+            lines = [l for l in result.stdout.split("\n") if l.strip()]
+            return [l for l in lines if not l.startswith(("types:", "operations:"))]
+
+        rng = random.Random(13)
+        with tempfile.TemporaryDirectory() as directory:
+            letters = Path(directory) / "letters.txt"
+            segments = Path(directory) / "segments.txt"
+            for _ in range(40):
+                strings, t = random_instance(rng)
+                letters.write_text("\n".join(strings + [t]) + "\n")
+                segments.write_text("\n".join(map(chr1_line, strings + [t])) + "\n")
+                for flags in ([], ["--general"], ["--no-foldback-first"],
+                              ["--general", "--no-foldback-first"]):
+                    with self.subTest(strings=strings, t=t, flags=flags):
+                        self.assertEqual(answer(letters, "--string-mode", *flags),
+                                         answer(segments, *flags))
+
 
 if __name__ == "__main__":
     unittest.main()
