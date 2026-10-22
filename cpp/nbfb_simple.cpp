@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -242,7 +243,10 @@ class SimpleSearch {
         build_extensions();
     }
 
-    Result solve(bool want_history) {
+    // all_optimal: also count every optimal history and list up to
+    // max_histories of them.
+    Result solve(bool want_history, bool all_optimal = false,
+                 std::size_t max_histories = 0) {
         const std::uint32_t start = node_id(0, 0, 0);
         const std::uint32_t goal = node_id(n_, 0, 0);
         offer(start, Cost{0, 0, 0}, NO_PARENT, Operation());
@@ -270,22 +274,277 @@ class SimpleSearch {
         }
         std::reverse(result.history.begin(), result.history.end());
         replay(result);
-        if (blocks_) {
-            // Index of the appended block among the source lines, or -1.
-            for (Operation& op : result.history) {
-                if (op.kind != 't') continue;
-                const Sequence block(text_.begin() + op.x, text_.begin() + op.x + op.y);
-                auto found = listed_.find(block);
-                op.source = found == listed_.end() ? -1 : found->second;
-                op.x = -1;
-                op.y = -1;
-            }
+        if (all_optimal) enumerate_optimal(start, goal, max_histories, result);
+        name_blocks(result.history);
+        for (std::vector<Operation>& history : result.optimal_histories) {
+            name_blocks(history);
         }
         if (!want_history) result.history.clear();
         return result;
     }
 
   private:
+    // In block mode a t-cycle records the block as T[x, x+y) until the end;
+    // it is then named by its index among the source lines, or -1.
+    void name_blocks(std::vector<Operation>& history) const {
+        if (!blocks_) return;
+        for (Operation& op : history) {
+            if (op.kind != 't') continue;
+            const Sequence block(text_.begin() + op.x, text_.begin() + op.x + op.y);
+            auto found = listed_.find(block);
+            op.source = found == listed_.end() ? -1 : found->second;
+            op.x = -1;
+            op.y = -1;
+        }
+    }
+
+    // -------------------------------------------------------- all optima
+    //
+    // The search computes the exact cost d(v) of every settled node v, and
+    // every string of an optimal history is settled, as every cycle raises
+    // the cost. An optimal history is therefore a path from the empty string
+    // to t in the DAG of tight edges (u, v), those with d(u) + cost = d(v).
+    // The DAG is built backward from t by inverting every cycle. Edges are
+    // kept once per (u, v, cycle type), so two histories differ exactly when
+    // their strings or their cycle types differ.
+
+    struct Tight {
+        std::uint32_t from;
+        Operation operation;
+    };
+
+    void enumerate_optimal(std::uint32_t start, std::uint32_t goal,
+                           std::size_t max_histories, Result& result) {
+        if (blocks_) build_block_index();
+        std::unordered_map<std::uint32_t, std::vector<Tight>> into;
+        std::vector<std::uint32_t> order{goal};
+        into[goal];
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            const std::uint32_t v = order[k];
+            if (v == start) continue;
+            std::vector<Tight> tight = tight_predecessors(v);
+            accounted_.add(tight.size() * sizeof(Tight) + 64);
+            for (const Tight& edge : tight) {
+                if (into.emplace(edge.from, std::vector<Tight>()).second) {
+                    order.push_back(edge.from);
+                }
+            }
+            into[v] = std::move(tight);
+        }
+
+        // Number of optimal histories ending in every DAG node, in order of
+        // increasing length (every cycle lengthens the string).
+        std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
+            return nodes_[a].phi + nodes_[a].len < nodes_[b].phi + nodes_[b].len;
+        });
+        using Big = unsigned __int128;
+        const Big cap = ~Big(0) >> 1;
+        std::unordered_map<std::uint32_t, Big> count;
+        bool saturated = false;
+        for (std::uint32_t v : order) {
+            Big c = v == start ? 1 : 0;
+            for (const Tight& edge : into[v]) {
+                const Big add_on = count[edge.from];
+                c = c > cap - add_on ? (saturated = true, cap) : c + add_on;
+            }
+            count[v] = c;
+        }
+        result.optimal_count = saturated ? "more than 2^127" : decimal(count[goal]);
+
+        // The histories, by a depth-first search backward from t.
+        std::vector<Operation> path;
+        std::function<bool(std::uint32_t)> walk = [&](std::uint32_t v) {
+            if (v == start) {
+                if (result.optimal_histories.size() >= max_histories) return false;
+                std::vector<Operation> history(path.rbegin(), path.rend());
+                Result check = result;
+                check.history = history;
+                replay(check);
+                accounted_.add(history.size() * sizeof(Operation) + 32);
+                result.optimal_histories.push_back(std::move(history));
+                return true;
+            }
+            for (const Tight& edge : into[v]) {
+                path.push_back(edge.operation);
+                const bool more = walk(edge.from);
+                path.pop_back();
+                if (!more) return false;
+            }
+            return true;
+        };
+        walk(goal);
+    }
+
+    static std::string decimal(unsigned __int128 value) {
+        if (value == 0) return "0";
+        std::string digits;
+        while (value > 0) {
+            digits.push_back(static_cast<char>('0' + static_cast<int>(value % 10)));
+            value /= 10;
+        }
+        return std::string(digits.rbegin(), digits.rend());
+    }
+
+    // The settled node of a rope, or NO_PARENT.
+    std::uint32_t settled_node(const Rope& rope) const {
+        const std::uint32_t phi = prefix_match(rope);
+        std::uint64_t key;
+        if (phi == rope.length) {
+            key = key_of(phi, 0, 0);
+        } else {
+            const std::int64_t off = find_window(slice(rope, phi, rope.length));
+            if (off < 0) return NO_PARENT;
+            key = key_of(phi, static_cast<std::uint32_t>(off), rope.length - phi);
+        }
+        const std::uint32_t id = index_.find(key);
+        if (id == FlatMap::NONE || !nodes_[id].settled) return NO_PARENT;
+        return id;
+    }
+
+    // Two ropes spell the same string.
+    bool same(const Rope& a, const Rope& b) const {
+        if (a.length != b.length) return false;
+        int i = 0, j = 0;
+        std::uint32_t ai = 0, bj = 0;  // offsets inside the current pieces
+        while (i < a.count && j < b.count) {
+            const Piece& pa = a.piece[i];
+            const Piece& pb = b.piece[j];
+            const std::uint32_t step = std::min(pa.len - ai, pb.len - bj);
+            if (lce(pa.off + ai, pb.off + bj) < step) return false;
+            ai += step;
+            bj += step;
+            if (ai == pa.len) { ++i; ai = 0; }
+            if (bj == pb.len) { ++j; bj = 0; }
+        }
+        return true;
+    }
+
+    std::vector<Tight> tight_predecessors(std::uint32_t v) const {
+        const Node& node = nodes_[v];
+        const Rope w = rope_of(node);
+        const std::uint32_t m = w.length;
+        std::vector<Tight> tight;
+        auto add = [&](std::uint32_t u, Operation operation, const Cost& step) {
+            if (u == NO_PARENT) return;
+            Cost c = nodes_[u].cost;
+            c.foldback += step.foldback;
+            c.t += step.t;
+            c.total += step.total;
+            if (!(c == node.cost)) return;
+            for (const Tight& edge : tight) {
+                if (edge.from == u && edge.operation.kind == operation.kind) return;
+            }
+            tight.push_back({u, operation});
+        };
+        const Cost fold{0, 0, 1};
+
+        // p, i and f: w = P Q R Qbar or P Q Rbar Qbar with |Q| = q and
+        // |P Q| = b, so the last q symbols of w are Qbar and w[b-q, b) = Q.
+        for (std::uint32_t q = 1; 2 * q <= m; ++q) {
+            const std::uint32_t length = m - q;  // length of the predecessor
+            const Rope Q = reversed(slice(w, length, m));
+            const Rope keep = slice(w, 0, length);
+            for (std::uint32_t b = q; b <= length; ++b) {
+                if (!same(slice(w, b - q, b), Q)) continue;
+                Operation operation;
+                operation.x = static_cast<int>(b - q);
+                operation.y = static_cast<int>(b);
+                if (b == length) {
+                    operation.kind = 'p';
+                    add(settled_node(keep), operation, fold);
+                    continue;
+                }
+                operation.kind = 'i';
+                add(settled_node(keep), operation, fold);
+                Rope flip = slice(w, 0, b);
+                flip.append(reversed(slice(w, b, length)));
+                operation.kind = 'f';
+                add(settled_node(flip), operation, fold);
+            }
+        }
+
+        // t: w = u x for a source x.
+        for (std::uint32_t k = 1; k <= m; ++k) {
+            const Rope tail = slice(w, m - k, m);
+            const Rope head = slice(w, 0, m - k);
+            Operation operation;
+            operation.kind = 't';
+            if (blocks_) {
+                const std::int64_t at = find_block(tail);
+                if (at < 0) continue;
+                operation.x = static_cast<int>(at);
+                operation.y = static_cast<int>(k);
+            } else {
+                operation.source = listed_source(tail);
+                if (operation.source < 0) continue;
+            }
+            const int first = text_[tail.piece[0].off];
+            operation.foldback = joins_ != nullptr && m - k > 0 &&
+                                 joins_->is_foldback(rope_last(head), first);
+            const Cost step{operation.foldback ? 1 : 0, 1, 1};
+            add(settled_node(head), operation, step);
+        }
+        return tight;
+    }
+
+    int rope_last(const Rope& rope) const {
+        const Piece& p = rope.piece[rope.count - 1];
+        return text_[p.off + p.len - 1];
+    }
+
+    Sequence spell(const Rope& rope) const {
+        Sequence s;
+        for (int k = 0; k < rope.count; ++k) {
+            s.insert(s.end(), text_.begin() + rope.piece[k].off,
+                     text_.begin() + rope.piece[k].off + rope.piece[k].len);
+        }
+        return s;
+    }
+
+    // Index of the first listed source spelled by the rope, or -1.
+    int listed_source(const Rope& rope) const {
+        if (source_index_.empty()) {
+            for (std::size_t k = sources_.size(); k-- > 0;) {
+                source_index_[sources_[k]] = static_cast<int>(k);
+            }
+        }
+        auto found = source_index_.find(spell(rope));
+        return found == source_index_.end() ? -1 : found->second;
+    }
+
+    // Block mode: every substring of every g and rc(g), keyed by hash and
+    // length, with all its distinct first occurrences.
+    void build_block_index() {
+        std::size_t entries = 0;
+        for (const auto& [begin, end] : strings_) {
+            entries += static_cast<std::size_t>(end - begin) * (end - begin + 1) / 2;
+        }
+        accounted_.add(entries * 64);
+        for (const auto& [begin, end] : strings_) {
+            for (std::uint32_t off = begin; off < end; ++off) {
+                for (std::uint32_t len = 1; off + len <= end; ++len) {
+                    std::vector<std::uint32_t>& list =
+                        blocks_index_[window_key(piece_hash(off, len), len)];
+                    bool known = false;
+                    for (std::uint32_t other : list) known |= lce(other, off) >= len;
+                    if (!known) list.push_back(off);
+                }
+            }
+        }
+    }
+
+    // A text position where the rope occurs as a block, or -1.
+    std::int64_t find_block(const Rope& rope) const {
+        auto found = blocks_index_.find(window_key(rope_hash(rope), rope.length));
+        if (found == blocks_index_.end()) return -1;
+        for (std::uint32_t at : found->second) {
+            Rope block;
+            block.push(at, rope.length);
+            if (same(rope, block)) return at;
+        }
+        return -1;
+    }
+
     // -------------------------------------------------------- tables
 
     void build_text() {
@@ -981,6 +1240,8 @@ class SimpleSearch {
     // and the index of every source line.
     std::vector<std::pair<std::uint32_t, std::uint32_t>> strings_;
     std::unordered_map<Sequence, int, SequenceHash> listed_;
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> blocks_index_;
+    mutable std::unordered_map<Sequence, int, SequenceHash> source_index_;
     std::size_t width_ = 0;
     std::vector<std::uint16_t> lce_;
     std::uint64_t base_ = 0;
@@ -1014,14 +1275,16 @@ Result nbfb_simple_dist(const PreparedSources& sources,
                         bool want_history,
                         MemoryBudget& budget,
                         const JoinTable* foldback_first,
-                        bool blocks) {
+                        bool blocks,
+                        bool all_optimal,
+                        std::size_t max_histories) {
     if (target.empty()) {
         Result result;
         result.reachable = true;
         return result;
     }
     SimpleSearch search(sources, target, budget, foldback_first, blocks);
-    return search.solve(want_history);
+    return search.solve(want_history, all_optimal, max_histories);
 }
 
 }  // namespace nbfb

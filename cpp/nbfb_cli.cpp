@@ -29,6 +29,13 @@
 //       with t, or its reverse complement, is a substring of t); see
 //       nbfb_simple.hpp. With --string-search, the string search under the
 //       same definition.
+//   --simple ... --all-optimal [--max-histories N]   (either mode)
+//       Also count every optimal history (same strings and cycle types =
+//       same history) and list them, at most N (default: all). Single
+//       mode: an optimal_histories line and one "optimal:" line per history
+//       (types, tab, operations) before the distance. Batch mode: an
+//       optimal_histories column, and with --history an all_ops column with
+//       the histories separated by '|'.
 //   --simple --blocks   (either mode)
 //       The same definition, with the sources being every contiguous block
 //       of the source lines and the reverse complement of every such block.
@@ -261,6 +268,8 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 bool string_search = false;
 bool simple = false;
 bool simple_blocks = false;
+bool all_optimal = false;
+std::size_t max_histories = static_cast<std::size_t>(-1);
 
 nbfb::Result solve(const nbfb::PreparedSources& sources,
                    const std::vector<int>& target, bool want_history,
@@ -271,7 +280,8 @@ nbfb::Result solve(const nbfb::PreparedSources& sources,
     }
     if (simple) {
         return nbfb::nbfb_simple_dist(sources, target, want_history, budget,
-                                      joins, simple_blocks);
+                                      joins, simple_blocks, all_optimal,
+                                      max_histories);
     }
     return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
 }
@@ -319,6 +329,15 @@ int run_single(const std::string& path, bool want_history,
             std::cout << "operations: \n";
         }
     }
+    if (all_optimal) {
+        std::cout << "optimal_histories: "
+                  << (result.reachable ? result.optimal_count : std::string("0"))
+                  << "\n";
+        for (const std::vector<nbfb::Operation>& history : result.optimal_histories) {
+            std::cout << "optimal: " << types_of(history) << '\t' << ops_of(history)
+                      << "\n";
+        }
+    }
     if (result.reachable) {
         std::cout << result.total << std::endl;
     } else {
@@ -337,6 +356,8 @@ struct Row {
     int total = 0;
     std::string types;
     std::string ops;
+    std::string optimal_count;
+    std::string all_ops;
     double seconds = 0.0;
     std::string error;
 };
@@ -395,6 +416,11 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
                 row.total = result.total;
                 row.types = types_of(result.history);
                 if (want_history) row.ops = ops_of(result.history);
+                row.optimal_count = result.reachable ? result.optimal_count : "0";
+                for (const auto& history : result.optimal_histories) {
+                    if (!row.all_ops.empty()) row.all_ops.push_back('|');
+                    row.all_ops += ops_of(history);
+                }
             } catch (const std::exception& error) {
                 row.ok = false;
                 row.error = error.what();
@@ -427,6 +453,8 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
     *out << "index\ttokens\t" << (foldback_first ? "foldback_t\t" : "")
          << "t_cycles\ttotal\ttypes\tseconds";
     if (want_history) *out << "\tops";
+    if (all_optimal) *out << "\toptimal_histories";
+    if (all_optimal && want_history) *out << "\tall_ops";
     *out << "\n";
     int failures = 0;
     for (std::size_t i = 0; i < rows.size(); ++i) {
@@ -450,6 +478,8 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
         std::snprintf(buffer, sizeof(buffer), "%.4f", row.seconds);
         *out << buffer;
         if (want_history) *out << '\t' << row.ops;
+        if (all_optimal) *out << '\t' << (row.ok ? row.optimal_count : "error");
+        if (all_optimal && want_history) *out << '\t' << row.all_ops;
         *out << "\n";
     }
     out->flush();
@@ -462,7 +492,8 @@ void usage() {
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
            "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
            "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--string-search] [--simple [--blocks]]\n";
+           "[--string-search] [--simple [--blocks] [--all-optimal "
+           "[--max-histories N]]]\n";
 }
 
 }  // namespace
@@ -522,6 +553,11 @@ int main(int argc, char** argv) {
             simple = true;
         } else if (argument == "--blocks") {
             simple_blocks = true;
+        } else if (argument == "--all-optimal") {
+            all_optimal = true;
+        } else if (argument == "--max-histories") {
+            max_histories = static_cast<std::size_t>(
+                std::strtoull(value("--max-histories").c_str(), nullptr, 10));
         } else if (argument == "-h" || argument == "--help") {
             usage();
             return 0;
@@ -537,6 +573,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (threads < 1) threads = 1;
+    if (all_optimal && (!simple || string_search)) {
+        std::cerr << "Error: --all-optimal needs --simple without --string-search\n";
+        return 2;
+    }
     if (simple_blocks && (!simple || string_search)) {
         std::cerr << "Error: --blocks needs --simple and is not available "
                      "with --string-search (list every block instead)\n";

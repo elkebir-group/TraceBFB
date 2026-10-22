@@ -131,6 +131,20 @@ of the appended block among the source lines, or `-1` if the block is not listed
 verbatim. `--blocks` and `--string-search` cannot be combined (list every block
 instead).
 
+With `--all-optimal [--max-histories N]`, `--simple` (with or without `--blocks`)
+also counts every optimal history and lists them, at most `N` (default: all).
+Two histories are the same when they have the same strings and the same cycle
+types; one cut point or source is printed for each step. The count is exact
+(128-bit). Single mode prints `optimal_histories: COUNT` and one
+`optimal: TYPES<tab>OPERATIONS` line per history before the distance. Batch mode
+adds an `optimal_histories` column, and with `--history` an `all_ops` column with
+the histories separated by `|`. The search itself keeps one parent per string, so
+a second pass walks backward from the target and inverts every cycle, keeping the
+steps `u -> v` with `d(u) + cost = d(v)`. Every string of an optimal history has its
+exact cost at that point, since every cycle raises the cost. The pass touches only
+the strings of optimal histories, and on H1437 chr5p (220 optimal histories)
+it adds no measurable time.
+
 | instance | n | sources | `--simple` | `--simple --string-search` |
 |---|---:|---:|---:|---:|
 | HCC1954 chr11q | 43 | 56 | 0.02 s | 1.4 s |

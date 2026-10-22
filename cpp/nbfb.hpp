@@ -36,6 +36,12 @@ struct Result {
     int t_cycles = 0;        // number of t-BFB cycles of the optimum
     int total = 0;           // total number of cycles of the optimum
     std::vector<Operation> history;  // filled only when requested
+    // Filled only when all optimal histories are requested: the exact number
+    // of optimal histories in decimal, and the histories themselves (all of
+    // them, or the first max_histories). Two histories are the same when
+    // they have the same strings and the same cycle types.
+    std::string optimal_count;
+    std::vector<std::vector<Operation>> optimal_histories;
 };
 
 // Fold-back-first objective (off unless a JoinTable is passed). A t-BFB
