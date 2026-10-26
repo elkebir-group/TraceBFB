@@ -77,7 +77,6 @@ def read_instance(path):
 def handle_bfbdist(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
     from bfbdist.distance import BFB_dist
-    from bfbdist.nbfb import NBFB_dist
 
     try:
         sources, target = read_instance(args.input)
@@ -86,11 +85,7 @@ def handle_bfbdist(args):
     except ValueError as error:
         sys.exit(f"Error: {error}")
 
-    compute = {
-        "bfb": BFB_dist,
-        "nbfb": NBFB_dist,
-    }[args.mode]
-    graph = compute(sources, target)
+    graph = BFB_dist(sources, target)
 
     try:
         with open(f"{args.out}.graph", "w", encoding="utf-8") as output:
@@ -133,11 +128,6 @@ def main():
     dist_parser.add_argument("-i", "--input", type=str, required=True)
     dist_parser.add_argument("-o", "--out", type=str, required=True)
     dist_parser.add_argument("--colored", action="store_true")
-    dist_parser.add_argument(
-        "--mode",
-        choices=["bfb", "nbfb"],
-        default="bfb",
-    )
     dist_parser.set_defaults(func=handle_bfbdist)
 
     args = parser.parse_args()

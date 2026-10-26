@@ -33,9 +33,10 @@ cycles and then in the total number of cycles. It is `0` only for an empty
 target, and infinite when no history exists.
 
 A history is **nested** if every sequence it produces is `t[1, psi] y`, a
-prefix of the target followed by a string `y` that is empty, the reverse
-complement of a substring of the target, or a source. The **NBFB distance**
-is the cost of an optimal nested history.
+prefix of the target followed by a string `y` such that `y` or its reverse
+complement is a substring of the target. The **NBFB distance** is the cost of
+an optimal nested history. It is computed by the C++ tool `nbfb` in `cpp/`
+(polynomial time; see `cpp/README.md`).
 
 ## Sequence format
 
@@ -96,15 +97,8 @@ Then run:
 bfbdist distance --input sequences.txt --out result --colored
 ```
 
-The distance is printed to standard output. Pass `--mode` to select the
-history class and algorithm:
-
-- `--mode bfb` (default): the general BFB distance, by backward search from
-  the target. Exponential time.
-- `--mode nbfb`: the NBFB distance, by breadth-first search over the NBFB
-  graph. Returns every optimal nested history. For large instances use the
-  C++ tool in `cpp/` (`nbfb`), which runs in `O(n^4)` time when the sources
-  are all blocks of a few strings.
+The BFB distance, by backward search from the target (exponential time), is
+printed to standard output. For the NBFB distance, use `cpp/nbfb`.
 
 The command creates:
 
@@ -127,7 +121,7 @@ the corresponding uncolored path file.
 ## Python API
 
 ```python
-from bfbdist import BFB_dist, NBFB_dist
+from bfbdist import BFB_dist
 from bfbdist.sequence import Sequence
 
 sources = [
@@ -139,7 +133,7 @@ target = sources[0].bfb_target(0, 1, False) + sources[1]
 graph = BFB_dist(sources, target)
 print(graph.calculate_bfb_distance())  # 3: t, p, t
 
-for path in NBFB_dist(sources, target).get_paths():
+for path in graph.get_paths():
     for state, child in zip(path, path[1:]):
         operation = graph.adjacency.get(state, {}).get(child)
         print(state.sequence, state.translocations, operation)

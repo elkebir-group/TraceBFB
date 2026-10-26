@@ -1,36 +1,46 @@
-// Command-line front end for the nested BFB distance.
+// Command-line front end for the nested BFB distance (nbfb_simple.hpp).
 //
-//   nbfb -i INSTANCE.txt [--history]
+//   nbfb -i INSTANCE.txt
 //       One source per line, the target on the last line, in the format of
-//       bfbdist's read_instance. Prints the distance on the last line of
-//       stdout, as an integer or "inf".
+//       bfbdist's read_instance. Prints foldback_t (with --foldback-first),
+//       t_cycles, types, operations and optimal_histories lines, then the
+//       distance on the last line, as an integer or "inf".
 //
 //   nbfb --sources SOURCES.txt --targets TARGETS.txt [-j N] [-o OUT.tsv]
 //       One shared source set and one target per line. Prints one TSV row
-//       per target.
+//       per target, with one optimal history (types, ops) and the number of
+//       optimal histories (optimal_histories).
 //
-//   The sources are all contiguous substrings of the source lines and
-//   their reverse complements (a file listing every block denotes the same
-//   set); see nbfb_blocks.hpp.
+//   Nestedness is the foldable-prefix definition: every string of the
+//   history is t[1,psi] y with y or the reverse complement of y a
+//   substring of t.
 //
-//   --foldback-first [--foldback-span BP|any]   (either mode)
+//   --blocks (default) | --general   (either mode)
+//       The sources are every contiguous block of the source lines and the
+//       reverse complement of every such block (a file listing every block
+//       denotes the same set), or the source lines exactly as listed.
+//   --foldback-first (default) | --no-foldback-first   (either mode)
 //       Minimize first the number of t-BFB cycles whose join is
-//       fold-back-shaped: the segment before the join and the first segment
+//       fold-back-shaped (the segment before the join and the first segment
 //       of the appended source lie on the same chromosome in opposite
-//       orientations, with breakpoints at most BP apart (default 50000).
-//       Adds a foldback_t line / column; such cycles print as 'T'.
-//   --string-search   (either mode)
-//       Use the direct search over strings of nbfb_state.hpp, with the
-//       sources taken exactly as listed (no closure under substrings). The
-//       exact reference for testing; O(n^2) cycles per node.
+//       orientations, with breakpoints at most --foldback-span BP apart,
+//       default 50000, or 'any'), then t-BFB cycles, then all cycles. Such
+//       cycles print as 'T'. --no-foldback-first minimizes t-BFB cycles,
+//       then all cycles.
+//   --all-optimal | --max-histories N   (either mode)
+//       The number of optimal histories (same strings and cycle types = same
+//       history) is always reported. These options also list the optimal
+//       histories: all of them, or at most N. Single mode: one "optimal:"
+//       line per history (types, tab, operations) before the distance.
+//       Batch mode: an all_ops column with the histories separated by '|'.
 
 #include "nbfb.hpp"
-#include "nbfb_blocks.hpp"
-#include "nbfb_state.hpp"
+#include "nbfb_simple.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -193,6 +203,7 @@ class SegmentInterner {
     std::unordered_map<std::string, int> table_;
     std::vector<Geometry> geometry_;  // orientation of each positive id
     int next_ = 0;
+
 };
 
 std::vector<std::string> read_lines(const std::string& path) {
@@ -247,20 +258,18 @@ std::string ops_of(const std::vector<nbfb::Operation>& history) {
 
 // -------------------------------------------------------------- modes
 
-// Set by --string-search.
-bool string_search = false;
+// Set by --blocks / --general and --all-optimal / --max-histories.
+bool blocks = true;
+std::size_t max_histories = 0;
 
-nbfb::Result solve(const nbfb::PreparedSources& sources,
-                   const std::vector<int>& target, bool want_history,
+nbfb::Result solve(const std::vector<std::vector<int>>& sources,
+                   const std::vector<int>& target,
                    nbfb::MemoryBudget& budget, const nbfb::JoinTable* joins) {
-    if (string_search) {
-        return nbfb::nbfb_state_dist(sources, target, want_history, budget,
-                                     joins);
-    }
-    return nbfb::nbfb_blocks_dist(sources, target, want_history, budget, joins);
+    return nbfb::nbfb_simple_dist(sources, target, budget, joins, blocks,
+                                  max_histories);
 }
 
-int run_single(const std::string& path, bool want_history,
+int run_single(const std::string& path,
                nbfb::MemoryBudget& budget, bool foldback_first,
                long long foldback_span) {
     const std::vector<std::string> lines = read_lines(path);
@@ -280,28 +289,31 @@ int run_single(const std::string& path, bool want_history,
     }
     const std::vector<int> target = interner.sequence(lines.back());
 
-    nbfb::PreparedSources prepared(std::move(sources));
     nbfb::JoinTable joins;
     if (foldback_first) joins = interner.join_table(foldback_span);
     const nbfb::Result result = solve(
-        prepared, target, want_history, budget,
-        foldback_first ? &joins : nullptr);
+        sources, target, budget, foldback_first ? &joins : nullptr);
     if (foldback_first) {
         std::cout << "foldback_t: "
                   << (result.reachable ? std::to_string(result.foldback_t)
                                        : std::string("inf"))
                   << "\n";
     }
-    if (want_history) {
-        if (result.reachable) {
-            std::cout << "t_cycles: " << result.t_cycles << "\n";
-            std::cout << "types: " << types_of(result.history) << "\n";
-            std::cout << "operations: " << ops_of(result.history) << "\n";
-        } else {
-            std::cout << "t_cycles: inf\n";
-            std::cout << "types: \n";
-            std::cout << "operations: \n";
-        }
+    if (result.reachable) {
+        std::cout << "t_cycles: " << result.t_cycles << "\n";
+        std::cout << "types: " << types_of(result.history) << "\n";
+        std::cout << "operations: " << ops_of(result.history) << "\n";
+    } else {
+        std::cout << "t_cycles: inf\n";
+        std::cout << "types: \n";
+        std::cout << "operations: \n";
+    }
+    std::cout << "optimal_histories: "
+              << (result.reachable ? result.optimal_count : std::string("0"))
+              << "\n";
+    for (const std::vector<nbfb::Operation>& history : result.optimal_histories) {
+        std::cout << "optimal: " << types_of(history) << '\t' << ops_of(history)
+                  << "\n";
     }
     if (result.reachable) {
         std::cout << result.total << std::endl;
@@ -321,12 +333,14 @@ struct Row {
     int total = 0;
     std::string types;
     std::string ops;
+    std::string optimal_count;
+    std::string all_ops;
     double seconds = 0.0;
     std::string error;
 };
 
 int run_batch(const std::string& sources_path, const std::string& targets_path,
-              int threads, const std::string& out_path, bool want_history,
+              int threads, const std::string& out_path,
               nbfb::MemoryBudget& budget, bool foldback_first,
               long long foldback_span) {
     SegmentInterner interner;
@@ -345,16 +359,13 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
         target_lines.push_back(line);
     }
 
-    // The interner is the only table shared across targets that depends on
-    // the sources alone, together with the prepared sources themselves; a
-    // target introducing a new segment extends the interner, so the
+    // A target introducing a new segment extends the interner, so the
     // targets are interned before the worker threads start.
     std::vector<std::vector<int>> targets;
     targets.reserve(target_lines.size());
     for (const std::string& line : target_lines) {
         targets.push_back(interner.sequence(line));
     }
-    const nbfb::PreparedSources prepared(std::move(sources));
     nbfb::JoinTable joins;
     if (foldback_first) joins = interner.join_table(foldback_span);
     const nbfb::JoinTable* joins_ptr = foldback_first ? &joins : nullptr;
@@ -371,14 +382,19 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
             const auto started = std::chrono::steady_clock::now();
             try {
                 const nbfb::Result result =
-                    solve(prepared, targets[i], true, budget, joins_ptr);
+                    solve(sources, targets[i], budget, joins_ptr);
                 row.ok = true;
                 row.reachable = result.reachable;
                 row.foldback_t = result.foldback_t;
                 row.t_cycles = result.t_cycles;
                 row.total = result.total;
                 row.types = types_of(result.history);
-                if (want_history) row.ops = ops_of(result.history);
+                row.ops = ops_of(result.history);
+                row.optimal_count = result.reachable ? result.optimal_count : "0";
+                for (const auto& history : result.optimal_histories) {
+                    if (!row.all_ops.empty()) row.all_ops.push_back('|');
+                    row.all_ops += ops_of(history);
+                }
             } catch (const std::exception& error) {
                 row.ok = false;
                 row.error = error.what();
@@ -409,8 +425,8 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
         out = &file;
     }
     *out << "index\ttokens\t" << (foldback_first ? "foldback_t\t" : "")
-         << "t_cycles\ttotal\ttypes\tseconds";
-    if (want_history) *out << "\tops";
+         << "t_cycles\ttotal\ttypes\tseconds\tops\toptimal_histories";
+    if (max_histories > 0) *out << "\tall_ops";
     *out << "\n";
     int failures = 0;
     for (std::size_t i = 0; i < rows.size(); ++i) {
@@ -433,7 +449,9 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
         char buffer[32];
         std::snprintf(buffer, sizeof(buffer), "%.4f", row.seconds);
         *out << buffer;
-        if (want_history) *out << '\t' << row.ops;
+        *out << '\t' << row.ops;
+        *out << '\t' << (row.ok ? row.optimal_count : "error");
+        if (max_histories > 0) *out << '\t' << row.all_ops;
         *out << "\n";
     }
     out->flush();
@@ -442,11 +460,12 @@ int run_batch(const std::string& sources_path, const std::string& targets_path,
 
 void usage() {
     std::cerr
-        << "usage: nbfb -i INSTANCE.txt [--history] [--max-mem-gb G]\n"
+        << "usage: nbfb -i INSTANCE.txt [--max-mem-gb G]\n"
            "       nbfb --sources SOURCES.txt --targets TARGETS.txt "
-           "[-j N] [-o OUT.tsv] [--history] [--max-mem-gb G]\n"
-           "       either form: [--foldback-first [--foldback-span BP|any]] "
-           "[--string-search]\n";
+           "[-j N] [-o OUT.tsv] [--max-mem-gb G]\n"
+           "       either form: [--blocks | --general] "
+           "[--foldback-first | --no-foldback-first] [--foldback-span BP|any] "
+           "[--all-optimal | --max-histories N]\n";
 }
 
 }  // namespace
@@ -457,9 +476,8 @@ int main(int argc, char** argv) {
     std::string targets;
     std::string out;
     int threads = 1;
-    bool want_history = false;
     double max_mem_gb = 2.0;
-    bool foldback_first = false;
+    bool foldback_first = true;
     long long foldback_span = 50000;
 
     for (int i = 1; i < argc; ++i) {
@@ -481,12 +499,12 @@ int main(int argc, char** argv) {
             out = value("-o");
         } else if (argument == "-j" || argument == "--threads") {
             threads = std::atoi(value("-j").c_str());
-        } else if (argument == "--history") {
-            want_history = true;
         } else if (argument == "--max-mem-gb") {
             max_mem_gb = std::atof(value("--max-mem-gb").c_str());
         } else if (argument == "--foldback-first") {
             foldback_first = true;
+        } else if (argument == "--no-foldback-first") {
+            foldback_first = false;
         } else if (argument == "--foldback-span") {
             const std::string span = value("--foldback-span");
             if (span == "any") {
@@ -500,8 +518,21 @@ int main(int argc, char** argv) {
                     return 2;
                 }
             }
-        } else if (argument == "--string-search") {
-            string_search = true;
+        } else if (argument == "--blocks") {
+            blocks = true;
+        } else if (argument == "--general") {
+            blocks = false;
+        } else if (argument == "--all-optimal") {
+            max_histories = static_cast<std::size_t>(-1);
+        } else if (argument == "--max-histories") {
+            const std::string text = value("--max-histories");
+            char* end = nullptr;
+            const unsigned long long n = std::strtoull(text.c_str(), &end, 10);
+            if (text.empty() || *end != '\0' || text[0] == '-' || text[0] == '+') {
+                std::cerr << "Error: --max-histories must be a non-negative integer\n";
+                return 2;
+            }
+            max_histories = static_cast<std::size_t>(n);
         } else if (argument == "-h" || argument == "--help") {
             usage();
             return 0;
@@ -527,14 +558,14 @@ int main(int argc, char** argv) {
                              "--targets\n";
                 return 2;
             }
-            return run_single(instance, want_history, budget, foldback_first,
+            return run_single(instance, budget, foldback_first,
                               foldback_span);
         }
         if (sources.empty() || targets.empty()) {
             usage();
             return 2;
         }
-        return run_batch(sources, targets, threads, out, want_history, budget,
+        return run_batch(sources, targets, threads, out, budget,
                          foldback_first, foldback_span);
     } catch (const nbfb::MemoryLimitExceeded& error) {
         std::cerr << "Error: " << error.what()

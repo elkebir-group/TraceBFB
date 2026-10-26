@@ -35,7 +35,12 @@ struct Result {
     int foldback_t = 0;      // t-BFB cycles creating a fold-back-shaped join
     int t_cycles = 0;        // number of t-BFB cycles of the optimum
     int total = 0;           // total number of cycles of the optimum
-    std::vector<Operation> history;  // filled only when requested
+    std::vector<Operation> history;  // one optimal history
+    // The exact number of optimal histories in decimal, and up to
+    // max_histories of them. Two histories are the same when they have the
+    // same strings and the same cycle types.
+    std::string optimal_count;
+    std::vector<std::vector<Operation>> optimal_histories;
 };
 
 // Fold-back-first objective (off unless a JoinTable is passed). A t-BFB
@@ -72,25 +77,9 @@ class MemoryBudget {
     void acquire(std::size_t bytes);
     void release(std::size_t bytes);
 
-    std::size_t limit() const { return limit_; }
-    std::size_t used() const { return used_.load(); }
-    std::size_t peak() const { return peak_.load(); }
-
   private:
     std::size_t limit_;
     std::atomic<std::size_t> used_;
-    std::atomic<std::size_t> peak_;
-};
-
-// The sources and their reverse complements. The only data that depends
-// on the sources alone, so one instance is shared by every target of a
-// batch run.
-struct PreparedSources {
-    std::vector<std::vector<int>> forward;
-    std::vector<std::vector<int>> reverse;
-
-    PreparedSources() = default;
-    explicit PreparedSources(std::vector<std::vector<int>> sources);
 };
 
 }  // namespace nbfb
