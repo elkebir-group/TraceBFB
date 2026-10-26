@@ -71,6 +71,22 @@ class BreakpointGraphTests(unittest.TestCase):
         self.assertIn(f"best walk: {2 * n} of {30 * n} traversals, 1 fold-back traversals", out)
         self.assertIn("walks of that value 1", out)
 
+    def test_lwalk_too_large_exits_5(self):
+        try:
+            subprocess.run(["make", "-C", str(CPP)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("cannot build cpp/lwalk")
+        # one segment of 20001 copies in tandem: over the 20000-traversal recursion limit
+        rows = ["H\tversion=1\tlocus=tandem", "S\t1\tchr1\t0\t100\t+\t20001",
+                "J\tj0\t1.R\t1.L\t20000\t0", "F\t1.L\t1", "F\t1.R\t1"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "graph.tsv"
+            path.write_text("\n".join(rows) + "\n")
+            run = subprocess.run([str(CPP / "lwalk"), str(path)], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 5)
+        self.assertIn("Too large", run.stderr)
+
 
 class FoldbackTests(unittest.TestCase):
     def test_reverse_read_segment_uses_genomic_sides(self):
