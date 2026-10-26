@@ -50,6 +50,43 @@ class BreakpointGraphTests(unittest.TestCase):
                         self.assertEqual(Path(f"{prefix}.walks.txt").read_text().split(),
                                          ["s0", "s1", "s2", "-s2", "-s1"])
 
+    def test_lwalk_key_leaves_out_reference_adjacencies(self):
+        # 60 segments of 30 copies: the reference adjacencies alone would need 295 key bits,
+        # but they follow from the one fold-back, so the walk search fits
+        try:
+            subprocess.run(["make", "-C", str(CPP)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("cannot build cpp/lwalk")
+        n = 60
+        rows = ["H\tversion=1\tlocus=chain"]
+        rows += [f"S\t{i}\tchr1\t{100 * i}\t{100 * i + 100}\t+\t30" for i in range(1, n + 1)]
+        rows += [f"R\t{i}.R\t{i + 1}.L\t30" for i in range(1, n)]
+        rows += [f"J\tj0\t{n}.R\t{n}.R\t15\t1", "F\t1.L\t30"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "graph.tsv"
+            path.write_text("\n".join(rows) + "\n")
+            out = subprocess.run([str(CPP / "lwalk"), str(path), "--max-foldbacks"],
+                                 capture_output=True, text=True, check=True).stdout
+        self.assertIn(f"best walk: {2 * n} of {30 * n} traversals, 1 fold-back traversals", out)
+        self.assertIn("walks of that value 1", out)
+
+    def test_lwalk_too_large_exits_5(self):
+        try:
+            subprocess.run(["make", "-C", str(CPP)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("cannot build cpp/lwalk")
+        # one segment of 20001 copies in tandem: over the 20000-traversal recursion limit
+        rows = ["H\tversion=1\tlocus=tandem", "S\t1\tchr1\t0\t100\t+\t20001",
+                "J\tj0\t1.R\t1.L\t20000\t0", "F\t1.L\t1", "F\t1.R\t1"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "graph.tsv"
+            path.write_text("\n".join(rows) + "\n")
+            run = subprocess.run([str(CPP / "lwalk"), str(path)], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 5)
+        self.assertIn("Too large", run.stderr)
+
 
 class FoldbackTests(unittest.TestCase):
     def test_reverse_read_segment_uses_genomic_sides(self):

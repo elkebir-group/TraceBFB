@@ -25,6 +25,10 @@
 // walk as ';'-separated tokens (the target format of cpp/nbfb --targets).  With --dedup-rc a walk
 // whose reverse complement is also an admissible walk (it ends at an allowed start) is written
 // only in the lexicographically smaller of its two readings.
+//
+// Exit status 5: the graph is too large for the exact search (memo table over --max-mem-gb, key
+// over 256 bits, over 32767 segments, over 4095 traversals with --max-foldbacks, or over 20000
+// traversals, the recursion depth).  Other errors exit with 2-4.
 
 #include <algorithm>
 #include <chrono>
@@ -44,6 +48,11 @@
 #include <vector>
 
 typedef unsigned __int128 u128;
+
+// The graph exceeds a size limit of the exact search (exit status 5).
+struct TooLarge : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 static const int KW = 4;  // key words: 256 bits
 
 static std::string u128str(u128 v) {
@@ -240,7 +249,7 @@ struct Table {
     void grow(size_t n) {
         size_t bytes = n * sizeof(Entry) + slots.size() * sizeof(Entry);
         if (bytes > limit_bytes)
-            throw std::runtime_error("memo table would exceed --max-mem-gb (" + std::to_string(used) +
+            throw TooLarge("memo table would exceed --max-mem-gb (" + std::to_string(used) +
                                      " states stored)");
         std::vector<Entry> old;
         old.swap(slots);
@@ -289,26 +298,63 @@ struct Solver {
     Solver(const Graph& graph, size_t limit) : g(graph), table(limit) {
         brem = g.bm;
         crem = g.cap;
-        int bit = 16;  // bits 0..7 start node, 8..15 current node
+        if (2 * g.S > 0xffff) throw TooLarge("too many segments (node ids must fit in 16 bits)");
+        // A bond needs no field in the key when its residual follows from the others.  Every
+        // traversal of segment s touches both of its nodes once, so the bonds used at one node of s,
+        // less those at the other, are fixed by the start and current nodes: one linear equation per
+        // segment.  Elimination picks a set of bonds whose columns are independent (widest fields
+        // first); their residuals follow from the remaining bonds, so they are left out of the key.
+        // Arithmetic is modulo a prime: columns independent there are independent over the rationals.
+        const int64_t P = 2147483647;
+        auto inv = [&](int64_t a) {  // a^(P-2) mod P
+            int64_t r = 1, e = P - 2;
+            for (a %= P; e; e >>= 1, a = a * a % P) if (e & 1) r = r * a % P;
+            return r;
+        };
+        std::vector<std::vector<int64_t>> eq(g.S, std::vector<int64_t>(g.M, 0));
+        for (int b = 0; b < g.M; ++b)
+            for (int x : {g.ba[b], g.bb[b]}) eq[x >> 1][b] += (x & 1) ? P - 1 : 1;
+        std::vector<int> order(g.M);
+        for (int b = 0; b < g.M; ++b) order[b] = b;
+        std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return g.bm[a] > g.bm[b]; });
+        std::vector<char> settled(g.M, 0);
+        int rank = 0;
+        for (int b : order) {
+            int r = rank;
+            while (r < g.S && eq[r][b] % P == 0) ++r;
+            if (r == g.S) continue;
+            std::swap(eq[r], eq[rank]);
+            int64_t f = inv(eq[rank][b] % P);
+            for (auto& v : eq[rank]) v = v % P * f % P;
+            for (int i = 0; i < g.S; ++i) {
+                if (i == rank || eq[i][b] % P == 0) continue;
+                int64_t c = eq[i][b] % P;
+                for (int k = 0; k < g.M; ++k) eq[i][k] = ((eq[i][k] - c * eq[rank][k]) % P + P) % P;
+            }
+            settled[b] = 1;
+            if (++rank == g.S) break;
+        }
+        int bit = 32;  // bits 0..15 start node, 16..31 current node
         for (int b = 0; b < g.M; ++b) {
+            if (settled[b]) { off.push_back(-1); width.push_back(0); continue; }
             int w = 1;
             while ((1 << w) <= g.bm[b]) ++w;
             if (bit % 64 + w > 64) bit += 64 - bit % 64;  // a field never straddles two words
             off.push_back(bit); width.push_back(w);
             bit += w;
         }
-        if (bit > 64 * KW) throw std::runtime_error("state does not fit in 256 bits");
-        if (2 * g.S > 255) throw std::runtime_error("too many segments (node ids must fit in 8 bits)");
+        if (bit > 64 * KW) throw TooLarge("state does not fit in 256 bits");
         std::memset(key, 0, sizeof(key));
         for (int b = 0; b < g.M; ++b) add_bond(b, g.bm[b]);
     }
     void add_bond(int b, int delta) {  // signed change of the packed residual of bond b
         int o = off[b];
+        if (o < 0) return;
         uint64_t v = uint64_t(delta < 0 ? -delta : delta) << (o % 64);
         if (delta < 0) key[o / 64] -= v; else key[o / 64] += v;
     }
     void set_nodes(int start, int cur) {
-        key[0] = (key[0] & ~uint64_t(0xffff)) | uint64_t(start) | (uint64_t(cur) << 8);
+        key[0] = (key[0] & ~uint64_t(0xffffffff)) | uint64_t(start) | (uint64_t(cur) << 16);
     }
     int start = 0;
 
@@ -390,16 +436,18 @@ int main(int argc, char** argv) {
             throw std::runtime_error(starts_arg.empty() ? "the graph has no free end"
                                                         : "no free end matches --starts " + starts_arg);
         std::set<int> start_set(starts.begin(), starts.end());
+        long total_trav = 0;
+        for (int c : g.cap) total_trav += c;
+        if (MAX_FB && total_trav > 0xfff)
+            throw TooLarge("--max-foldbacks supports at most 4095 traversals, the graph has " +
+                           std::to_string(total_trav));
+        if (total_trav > 20000)  // the search recurses once per traversal
+            throw TooLarge("at most 20000 traversals, the graph has " + std::to_string(total_trav));
         Solver sv(g, size_t(mem_gb * 1073741824.0));
         auto t0 = std::chrono::steady_clock::now();
         int L = 0;
         u128 total = 0;
         std::vector<std::pair<int, u128>> per(starts.size(), {0, 0});
-        long total_trav = 0;
-        for (int c : g.cap) total_trav += c;
-        if (MAX_FB && total_trav > 0xfff)
-            throw std::runtime_error("--max-foldbacks supports at most 4095 traversals, the graph has " +
-                                     std::to_string(total_trav));
         for (size_t i = 0; i < starts.size(); ++i) {
             int s0 = starts[i];
             if (!sv.crem[s0 >> 1]) continue;
@@ -540,6 +588,9 @@ int main(int argc, char** argv) {
         }
         std::cout << "wrote " << written << " walks to " << prefix << ".{walks,targets}.txt"
                   << (dedup ? " (" + std::to_string(skipped) + " reverse-complement readings skipped)" : "") << "\n";
+    } catch (const TooLarge& e) {
+        std::cerr << "Too large: " << e.what() << "\n";
+        return 5;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 3;
