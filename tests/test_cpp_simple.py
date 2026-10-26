@@ -2,9 +2,9 @@
 the foldable-prefix definition literally: with `--general` (the source lines
 as listed) and with `--blocks` (every block of the source lines, the default),
 under both objectives (`--foldback-first`, the default, and
-`--no-foldback-first`). With `--all-optimal`, both list exactly the optimal
-histories of a brute-force enumeration (a history is its strings and cycle
-types)."""
+`--no-foldback-first`). The reported number of optimal histories is that of a
+brute-force enumeration, and with `--all-optimal` the listed histories are
+exactly the enumerated ones (a history is its strings and cycle types)."""
 
 import heapq
 import random
@@ -185,7 +185,7 @@ class CppSimpleSearchTests(unittest.TestCase):
 
     def run_nbfb(self, path, *flags):
         result = subprocess.run(
-            [str(CPP / "nbfb"), "-i", str(path), "--history", "--max-mem-gb", "1", *flags],
+            [str(CPP / "nbfb"), "-i", str(path), "--max-mem-gb", "1", *flags],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             universal_newlines=True, check=True)
         lines = [l for l in result.stdout.split("\n") if l.strip()]
@@ -265,40 +265,73 @@ class CppSimpleSearchTests(unittest.TestCase):
                         self.assertEqual(count, len(expected))
                         self.assertEqual(set(listed), expected)
 
-    def test_string_mode_matches_segment_input(self):
-        # --string-mode reads one letter per segment, and a join is fold-back-
-        # shaped when the letters have opposite case. The same instance in
-        # segment format, with every letter on chr1 within 50 kb, must give
-        # the same answers under every option.
-        def chr1_line(text):
-            return ";".join(
-                f"chr1:{10 * (ord(c.upper()) - 64)}-{10 * (ord(c.upper()) - 64) + 9}[R]"
-                if c.isupper() else
-                f"chr1:{10 * (ord(c.upper()) - 64) + 9}-{10 * (ord(c.upper()) - 64)}[C]"
-                for c in text)
-
-        def answer(path, *flags):
-            result = subprocess.run(
-                [str(CPP / "nbfb"), "-i", str(path), "--history", "--all-optimal",
-                 "--max-histories", "0", "--max-mem-gb", "1", *flags],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                universal_newlines=True, check=True)
-            lines = [l for l in result.stdout.split("\n") if l.strip()]
-            return [l for l in lines if not l.startswith(("types:", "operations:"))]
-
+    def test_count_is_reported_without_listing(self):
+        # The count is always reported; histories are listed only on request,
+        # and --max-histories caps the list.
         rng = random.Random(13)
         with tempfile.TemporaryDirectory() as directory:
-            letters = Path(directory) / "letters.txt"
-            segments = Path(directory) / "segments.txt"
-            for _ in range(40):
+            path = Path(directory) / "instance.txt"
+            for _ in range(30):
                 strings, t = random_instance(rng)
-                letters.write_text("\n".join(strings + [t]) + "\n")
-                segments.write_text("\n".join(map(chr1_line, strings + [t])) + "\n")
-                for flags in ([], ["--general"], ["--no-foldback-first"],
-                              ["--general", "--no-foldback-first"]):
-                    with self.subTest(strings=strings, t=t, flags=flags):
-                        self.assertEqual(answer(letters, "--string-mode", *flags),
-                                         answer(segments, *flags))
+                path.write_text("\n".join(map(line, strings + [t])) + "\n")
+                with self.subTest(strings=strings, t=t):
+                    count, listed = self.run_all_optimal(path, strings, "--general")
+                    plain = self.output(path, "--general")
+                    self.assertEqual(plain["optimal_histories"], str(count))
+                    self.assertNotIn("optimal", plain)
+                    one = self.output(path, "--general", "--max-histories", "1")
+                    self.assertEqual(one["optimal_histories"], str(count))
+                    self.assertEqual(len(one.get("optimal", [])), min(count, 1))
+
+    def output(self, path, *flags):
+        result = subprocess.run(
+            [str(CPP / "nbfb"), "-i", str(path), "--max-mem-gb", "1", *flags],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, check=True)
+        fields = {}
+        for l in result.stdout.split("\n"):
+            if l.startswith("optimal: "):
+                fields.setdefault("optimal", []).append(l)
+            elif ": " in l:
+                key, value = l.split(": ", 1)
+                fields[key] = value
+        return fields
+
+    def test_batch_mode_matches_single_mode(self):
+        rng = random.Random(17)
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            strings, t = random_instance(rng)
+            targets = [t, rc(t), t + t[-1]]
+            (directory / "sources.txt").write_text("\n".join(map(line, strings)) + "\n")
+            (directory / "targets.txt").write_text("\n".join(map(line, targets)) + "\n")
+            subprocess.run(
+                [str(CPP / "nbfb"), "--sources", str(directory / "sources.txt"),
+                 "--targets", str(directory / "targets.txt"), "-o", str(directory / "out.tsv"),
+                 "--max-mem-gb", "1"], check=True)
+            header, *rows = (directory / "out.tsv").read_text().splitlines()
+            columns = header.split("\t")
+            self.assertIn("ops", columns)
+            self.assertIn("optimal_histories", columns)
+            self.assertNotIn("all_ops", columns)
+            for target, row in zip(targets, rows):
+                got = dict(zip(columns, row.split("\t")))
+                path = directory / "instance.txt"
+                path.write_text("\n".join(map(line, strings + [target])) + "\n")
+                single = self.output(path)
+                self.assertEqual(got["optimal_histories"], single["optimal_histories"])
+                self.assertEqual(got["ops"], single["operations"])
+
+    def test_max_histories_must_be_a_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "instance.txt"
+            path.write_text("\n".join(map(line, ["AB", "ABba"])) + "\n")
+            for value in ("ten", "-1", ""):
+                with self.subTest(value=value):
+                    result = subprocess.run(
+                        [str(CPP / "nbfb"), "-i", str(path), "--max-histories", value],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":

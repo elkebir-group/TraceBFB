@@ -90,7 +90,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(Path(f"{prefix}.paths.ansi").exists())
 
-    def test_distance_modes_agree_on_two_sources(self):
+    def test_distance_on_two_sources(self):
         first = genomic_sequence(2, "chr1")
         second = genomic_sequence(1, "chr2")
         target = first.bfb_target(0, 2, False) + second
@@ -99,18 +99,15 @@ class CLITests(unittest.TestCase):
             input_path.write_text(
                 f"{first}\n{second}\n{target}\n", encoding="utf-8"
             )
-            for mode in ("bfb", "nbfb"):
-                with self.subTest(mode=mode):
-                    prefix = Path(directory) / mode
-                    result = self.run_cli(
-                        "distance", "-i", str(input_path), "-o", str(prefix),
-                        "--mode", mode,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), "3")
-                    with Path(f"{prefix}.graph").open(encoding="utf-8") as f:
-                        graph = BFBGraph.from_text(f)
-                    self.assertEqual(graph.sources, (first, second))
+            prefix = Path(directory) / "bfb"
+            result = self.run_cli(
+                "distance", "-i", str(input_path), "-o", str(prefix),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "3")
+            with Path(f"{prefix}.graph").open(encoding="utf-8") as f:
+                graph = BFBGraph.from_text(f)
+            self.assertEqual(graph.sources, (first, second))
 
     def test_distance_rejects_blank_lines_and_single_line(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -160,20 +157,19 @@ class CLITests(unittest.TestCase):
             # The simulated instance feeds straight into the distance command.
             result = self.run_cli(
                 "distance", "-i", str(input_path),
-                "-o", str(Path(directory) / "result"), "--mode", "nbfb",
+                "-o", str(Path(directory) / "result"),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertLessEqual(int(result.stdout), 4)
 
     def test_python_module_api_works_in_external_process(self):
         code = (
-            "from bfbdist import BFB_dist, BFBGraph, NBFB_dist;"
+            "from bfbdist import BFB_dist, BFBGraph;"
             "from bfbdist.sequence import LetterAsSegment, Sequence;"
             "s=Sequence([LetterAsSegment('A')]);"
             "g=BFB_dist([s],s);"
             "assert isinstance(g,BFBGraph);"
-            "assert g.bfb_distance == 1;"
-            "assert NBFB_dist([s],s).calculate_bfb_distance() == 1"
+            "assert g.bfb_distance == 1"
         )
 
         result = subprocess.run(

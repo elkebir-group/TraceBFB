@@ -1,16 +1,13 @@
 """Sources may be reused, histories minimize t-BFB cycles first, and t-BFB
 cycles may keep the matched prefix."""
 
-import math
-import random
 import unittest
 
 from bfbdist.distance import BFB_dist, _bounded_search
-from bfbdist.nbfb import NBFB_dist
 from bfbdist.sequence import LetterAsSegment, Sequence
 from tests.helpers import assert_valid_generated_graph, letters
 
-ALGORITHMS = (BFB_dist, NBFB_dist)
+ALGORITHMS = (BFB_dist,)
 
 
 class SourceReuseTests(unittest.TestCase):
@@ -127,22 +124,6 @@ class RelaxedNestedTests(unittest.TestCase):
                     graph.adjacency[a][b].kind for a, b in zip(path, path[1:])
                 ]
                 self.assertEqual(kinds, ["t", "i", "t", "f"])
-
-    def test_general_distance_is_at_most_nested(self):
-        rng = random.Random(20260916)
-        alphabet = "ABab"
-        for _ in range(150):
-            target = letters("".join(rng.choice(alphabet) for _ in range(rng.randint(1, 7))))
-            sources = [
-                letters("".join(rng.choice(alphabet) for _ in range(rng.randint(1, 3))))
-                for _ in range(rng.randint(1, 3))
-            ]
-            with self.subTest(sources=sources, target=target):
-                def label(graph):
-                    return (graph.translocation_count(), graph.calculate_bfb_distance())
-                slow = label(NBFB_dist(sources, target))
-                general = label(BFB_dist(sources, target))
-                self.assertLessEqual(general, slow)
 
 
 if __name__ == "__main__":

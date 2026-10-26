@@ -213,9 +213,9 @@ struct Node {
 
 class SimpleSearch {
   public:
-    SimpleSearch(const PreparedSources& sources, const Sequence& target,
+    SimpleSearch(const std::vector<Sequence>& sources, const Sequence& target,
                  MemoryBudget& budget, const JoinTable* joins, bool blocks)
-        : sources_(sources.forward),
+        : sources_(sources),
           target_(target),
           n_(static_cast<std::uint32_t>(target.size())),
           joins_(joins),
@@ -243,10 +243,9 @@ class SimpleSearch {
         build_extensions();
     }
 
-    // all_optimal: also count every optimal history and list up to
+    // One optimal history, the number of optimal histories, and up to
     // max_histories of them.
-    Result solve(bool want_history, bool all_optimal = false,
-                 std::size_t max_histories = 0) {
+    Result solve(std::size_t max_histories) {
         const std::uint32_t start = node_id(0, 0, 0);
         const std::uint32_t goal = node_id(n_, 0, 0);
         offer(start, Cost{0, 0, 0}, NO_PARENT, Operation());
@@ -273,13 +272,12 @@ class SimpleSearch {
             result.history.push_back(nodes_[id].operation);
         }
         std::reverse(result.history.begin(), result.history.end());
-        replay(result);
-        if (all_optimal) enumerate_optimal(start, goal, max_histories, result);
+        replay(result.history, end.cost);
+        enumerate_optimal(start, goal, max_histories, result);
         name_blocks(result.history);
         for (std::vector<Operation>& history : result.optimal_histories) {
             name_blocks(history);
         }
-        if (!want_history) result.history.clear();
         return result;
     }
 
@@ -352,14 +350,14 @@ class SimpleSearch {
         result.optimal_count = saturated ? "more than 2^127" : decimal(count[goal]);
 
         // The histories, by a depth-first search backward from t.
+        if (max_histories == 0) return;
+        const Cost optimum{result.foldback_t, result.t_cycles, result.total};
         std::vector<Operation> path;
         std::function<bool(std::uint32_t)> walk = [&](std::uint32_t v) {
             if (v == start) {
                 if (result.optimal_histories.size() >= max_histories) return false;
                 std::vector<Operation> history(path.rbegin(), path.rend());
-                Result check = result;
-                check.history = history;
-                replay(check);
+                replay(history, optimum);
                 accounted_.add(history.size() * sizeof(Operation) + 32);
                 result.optimal_histories.push_back(std::move(history));
                 return true;
@@ -614,7 +612,10 @@ class SimpleSearch {
     void build_lce() {
         // lce_[i * width + j] = longest common extension of T[i..] and T[j..].
         width_ = text_.size() + 1;
-        if (width_ > 65535) throw std::invalid_argument("target too long");
+        if (width_ > 65535) {
+            throw std::invalid_argument(
+                "target and source lines too long (more than 65534 positions)");
+        }
         accounted_.add(width_ * width_ * sizeof(std::uint16_t));
         lce_.assign(width_ * width_, 0);
         for (std::size_t i = text_.size(); i-- > 0;) {
@@ -1036,7 +1037,7 @@ class SimpleSearch {
             for (const auto& [begin, end] : strings_) {
                 for (std::uint32_t c = begin; c < end && length < n_; ++c) {
                     const int symbol = text_[c];
-                    if (std::abs(symbol) > symbols_ || !follows(symbol)) continue;
+                    if (!follows(symbol)) continue;
                     const bool foldback = joins_ != nullptr && length > 0 &&
                                           joins_->is_foldback(last, symbol);
                     Cost cost = u.cost;
@@ -1138,10 +1139,10 @@ class SimpleSearch {
     // Replays the history on strings: every cycle must be valid, every
     // string a foldable prefix of t, the last string t, and the cost the
     // reported one.
-    void replay(const Result& result) const {
+    void replay(const std::vector<Operation>& history, const Cost& optimum) const {
         Sequence s;
         Cost cost;
-        for (const Operation& op : result.history) {
+        for (const Operation& op : history) {
             const std::size_t length = s.size();
             if (op.kind == 't') {
                 const Sequence x = appended(op);
@@ -1168,7 +1169,7 @@ class SimpleSearch {
             if (!foldable(s)) fail("string not a foldable prefix");
         }
         if (s != target_) fail("history does not end in the target");
-        if (!(cost == Cost{result.foldback_t, result.t_cycles, result.total})) {
+        if (!(cost == optimum)) {
             fail("cost");
         }
     }
@@ -1254,7 +1255,7 @@ class SimpleSearch {
     };
     std::vector<TrieNode> trie_;
     FlatMap root_;                       // first symbol -> trie child
-    int symbols_ = 0;                    // largest |symbol| of t
+    int symbols_ = 0;                    // largest |symbol| of T
     FlatMap bigrams_;                    // adjacent pairs of t and rc(t)
     FlatMap follow_index_;               // window -> index into follow_begin_
     std::vector<std::uint32_t> follow_begin_;
@@ -1270,21 +1271,22 @@ class SimpleSearch {
 
 }  // namespace
 
-Result nbfb_simple_dist(const PreparedSources& sources,
+Result nbfb_simple_dist(const std::vector<std::vector<int>>& sources,
                         const std::vector<int>& target,
-                        bool want_history,
                         MemoryBudget& budget,
                         const JoinTable* foldback_first,
                         bool blocks,
-                        bool all_optimal,
                         std::size_t max_histories) {
     if (target.empty()) {
+        // The empty history is the only one.
         Result result;
         result.reachable = true;
+        result.optimal_count = "1";
+        if (max_histories > 0) result.optimal_histories.emplace_back();
         return result;
     }
     SimpleSearch search(sources, target, budget, foldback_first, blocks);
-    return search.solve(want_history, all_optimal, max_histories);
+    return search.solve(max_histories);
 }
 
 }  // namespace nbfb

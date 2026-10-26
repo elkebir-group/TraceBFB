@@ -1,7 +1,7 @@
 # `nbfb`: nested BFB distance in C++17
 
-Computes the NBFB distance of a target over a source set, and optionally every
-optimal history. A history is nested if every string it produces is a foldable
+Computes the NBFB distance of a target over a source set, one optimal history,
+and the number of optimal histories, and optionally lists every optimal history. A history is nested if every string it produces is a foldable
 prefix of the target `t`: `s = x y`, where `x` is a prefix of `t` and `y` or
 `rc(y)` is a substring of `t`.
 
@@ -32,14 +32,6 @@ are joined by `;` and written `chr0:1000-1900[R]` (forward) or `chr0:1900-1000[C
 (reverse complement). In batch mode every line of `T.txt` is a target over the
 shared sources of `S.txt`.
 
-With `--string-mode`, every line is instead a string of letters, one segment per
-character: an upper-case letter is forward and the lower-case letter its reverse
-complement, so `ABCcb` is A, B, C followed by C and B reversed. Blanks are
-ignored, and any other character is an error. The letters carry no coordinates
-and lie on one chromosome, so a join is fold-back-shaped exactly when its two
-letters have opposite case (`--foldback-span` is ignored). The search, its
-nestedness definition and every other option are unchanged.
-
 | option | meaning |
 |---|---|
 | `--blocks` (default) | sources = every contiguous block of the source lines and its reverse complement (a file listing every block denotes the same set) |
@@ -47,23 +39,22 @@ nestedness definition and every other option are unchanged.
 | `--foldback-first` (default) | minimize fold-back-shaped t-BFB joins, then t-BFB cycles, then all cycles |
 | `--no-foldback-first` | minimize t-BFB cycles, then all cycles |
 | `--foldback-span BP\|any` | a join `u -> v` is fold-back-shaped when both segments lie on the same chromosome in opposite orientations with breakpoints at most `BP` apart (default 50,000; `any` drops the distance test) |
-| `--string-mode` | read sources and targets as strings of letters (see above) |
-| `--history` | print one optimal history |
-| `--all-optimal [--max-histories N]` | count every optimal history exactly and list them, at most `N` (default: all) |
+| `--all-optimal` | list every optimal history |
+| `--max-histories N` | list at most `N` optimal histories |
 | `--max-mem-gb G` | memory budget for the whole process (default 2); exceeding it stops with exit status 3 |
 | `-j N`, `-o FILE` | batch mode: worker threads and output TSV (default stdout) |
 
 ### Output
 
 Single mode: the last line of stdout is the distance, an integer or `inf`. Before
-it come, as requested, `foldback_t:` (with `--foldback-first`), `t_cycles:`,
-`types:`, `operations:` (with `--history`), and `optimal_histories: COUNT` and one
-`optimal: TYPES<tab>OPERATIONS` line per history (with `--all-optimal`).
+it come `foldback_t:` (with `--foldback-first`), `t_cycles:`, `types:`,
+`operations:`, `optimal_histories: COUNT`, and one `optimal: TYPES<tab>OPERATIONS`
+line per listed history (with `--all-optimal` or `--max-histories`).
 
 Batch mode: one TSV row per target with the columns `index`, `tokens`,
 `foldback_t` (with `--foldback-first`), `t_cycles`, `total`, `types`, `seconds`,
-`ops` (with `--history`), `optimal_histories` (with `--all-optimal`), and
-`all_ops` (with both; histories separated by `|`). A target that fails, for
+`ops`, `optimal_histories`, and `all_ops` (with `--all-optimal` or
+`--max-histories`; histories separated by `|`). A target that fails, for
 example on the memory budget, gives an `error` row, and the exit status is 1.
 
 `types` lists the cycle kinds, with `T` for a fold-back-shaped t-BFB cycle.
@@ -88,7 +79,7 @@ position form a chain like the fold children. Running time:
 `O(n^4 log n + n^3 |S|)` with `--general` and `O(n^3 (n + K) log n)` with
 `--blocks`, for `n = |t|` and `K` the total length of the maximal source lines.
 
-`--all-optimal` adds a backward pass from `t` that inverts every cycle and keeps
+The count comes from a backward pass from `t` that inverts every cycle and keeps
 the steps `u -> v` with `d(u) + cost = d(v)`. Every string of an optimal history
 has its exact cost, because every cycle raises the cost. The count is a path
 count (128-bit), and the listing a depth-first search.

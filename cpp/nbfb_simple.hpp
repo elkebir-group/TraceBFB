@@ -50,21 +50,19 @@ namespace nbfb {
 // prefixes of one string, so they form chains like the fold children, for
 // O(n^3 (n + K) log n) time with K the total length of the maximal lines.
 //
-// With all_optimal, the result also gives the exact number of optimal
-// histories and lists up to max_histories of them (Result::optimal_count,
+// The result gives one optimal history and the exact number of optimal
+// histories, and lists up to max_histories of them (Result::optimal_count,
 // Result::optimal_histories). Two histories are the same when they have the
 // same strings and the same cycle types; one cut point or source stands for
 // each step. The search keeps one parent per node, so a second, backward
 // pass builds the DAG of all optimal steps: every string of an optimal
 // history is settled with its exact cost, and a step u -> v is optimal when
 // d(u) + cost = d(v).
-Result nbfb_simple_dist(const PreparedSources& sources,
+Result nbfb_simple_dist(const std::vector<std::vector<int>>& sources,
                         const std::vector<int>& target,
-                        bool want_history,
                         MemoryBudget& budget,
                         const JoinTable* foldback_first = nullptr,
-                        bool blocks = false,
-                        bool all_optimal = false,
+                        bool blocks = true,
                         std::size_t max_histories = 0);
 
 }  // namespace nbfb
