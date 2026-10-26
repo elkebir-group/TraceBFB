@@ -7,7 +7,7 @@ from pathlib import Path
 
 from bfbdist.breakpoint_graph import BreakpointGraph
 from bfbdist.sequence import Sequence
-from tests.test_cpp_nbfb import CPP, line
+from tests.helpers import CPP, line
 
 # HG008-T chr19 (Z A B C D E F G P, D deleted) and a single fold-back.
 CASES = [

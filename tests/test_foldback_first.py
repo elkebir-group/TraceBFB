@@ -11,7 +11,7 @@ from bfbdist.foldback_first import foldback_first_BFB_dist
 from bfbdist.history import State
 from bfbdist.history import Operation
 from bfbdist.sequence import Sequence
-from tests.test_cpp_nbfb import CASES, CPP, blocks, line
+from tests.helpers import CASES, CPP, blocks, line
 
 
 def replay(sources, ops):
@@ -60,8 +60,8 @@ class FoldbackFirstTests(unittest.TestCase):
             path = Path(directory) / "instance.txt"
             for strings, target in CASES:
                 path.write_text("\n".join(map(line, strings + [target])) + "\n")
-                out = subprocess.run([str(CPP / "nbfb"), "-i", str(path), "--foldback-first",
-                                      "--history"], stdout=subprocess.PIPE,
+                out = subprocess.run([str(CPP / "nbfb"), "-i", str(path), "--foldback-first"],
+                                     stdout=subprocess.PIPE,
                                      universal_newlines=True, check=True).stdout.split("\n")
                 kv = dict(l.split(": ", 1) for l in out if ": " in l)
                 total = [l for l in out if l.strip()][-1]

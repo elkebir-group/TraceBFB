@@ -1,3 +1,4 @@
+from pathlib import Path
 import math
 
 from bfbdist.bfb_graph import BFBGraph
@@ -42,3 +43,40 @@ def assert_valid_generated_graph(testcase, graph, expected_distance):
         ]
         testcase.assertEqual(kinds[0], "t")
         testcase.assertEqual(kinds.count("t"), path[-1].translocations)
+
+
+# Letter instances for the C++ tools: upper case is a forward segment on chr1,
+# lower case its reverse complement.
+CPP = Path(__file__).resolve().parents[1] / "cpp"
+
+CASES = [
+    (["ABCD"], "ABCDdcb"),
+    (["ABCD", "X"], "ABCDXcb"),
+    (["ABCD", "x"], "ABCXdcb"),
+    (["ABCD", "y"], "ABCDcYBC"),
+    (["AAba"], "AAAAAABaa"),
+    (["AAB"], "AABbAbAAB"),
+    (["ZABCDEFGP"], "ZABCFEFGPgfefcbaB"),
+    (["AB"], "C"),
+]
+
+
+def token(letter):
+    k = 10 * (ord(letter.upper()) - 64)
+    return f"chr1:{k}-{k + 9}[R]" if letter.isupper() else f"chr1:{k + 9}-{k}[C]"
+
+
+def line(text):
+    return ";".join(token(c) for c in text)
+
+
+def blocks(strings):
+    """Every block of every string, in both orientations, once each."""
+    out = []
+    for s in strings:
+        for i in range(len(s)):
+            for j in range(i + 1, len(s) + 1):
+                for b in (s[i:j], s[i:j][::-1].swapcase()):
+                    if b not in out:
+                        out.append(b)
+    return out
