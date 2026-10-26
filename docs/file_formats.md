@@ -118,7 +118,8 @@ Tab-separated, with a column header. Lines starting with `#` are comments.
 | `example_read` | no | the name of one such read |
 
 - A string and its reverse complement are the same constraint. Each is written once, in the
-  orientation whose string sorts first.
+  reading with more forward segments (ties: the smaller reading as integers), e.g. `1 2 3`, not
+  `-3 -2 -1`.
 - With `read_set`, a string may appear once per read set.
 - When used with a graph, every id must be a segment of the graph. Whether consecutive segments
   are joined by an edge is checked by the analysis, not by the reader.
