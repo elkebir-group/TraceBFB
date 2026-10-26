@@ -289,8 +289,30 @@ struct Solver {
     Solver(const Graph& graph, size_t limit) : g(graph), table(limit) {
         brem = g.bm;
         crem = g.cap;
+        // A bond needs no field in the key when its residual follows from the others.  Every
+        // traversal of segment s touches both of its nodes once, so the bonds used at one node of s,
+        // less those at the other, are fixed by the start and current nodes.  Each segment thus
+        // settles one bond it touches unevenly once all its other such bonds are settled
+        // (reference adjacencies, chain by chain from the window ends).
+        std::vector<std::vector<std::pair<int, int>>> touch(g.S);  // segment -> (bond, coefficient)
+        for (int b = 0; b < g.M; ++b) {
+            std::map<int, int> c;
+            for (int x : {g.ba[b], g.bb[b]}) c[x >> 1] += (x & 1) ? -1 : 1;
+            for (auto& sc : c) if (sc.second) touch[sc.first].push_back({b, sc.second});
+        }
+        std::vector<char> settled(g.M, 0), used(g.S, 0);
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (int s = 0; s < g.S; ++s) {
+                if (used[s]) continue;
+                int open = -1, n = 0;
+                for (auto& bc : touch[s]) if (!settled[bc.first]) { open = bc.first; ++n; }
+                if (n == 1) { settled[open] = 1; used[s] = 1; changed = true; }
+            }
+        }
         int bit = 16;  // bits 0..7 start node, 8..15 current node
         for (int b = 0; b < g.M; ++b) {
+            if (settled[b]) { off.push_back(-1); width.push_back(0); continue; }
             int w = 1;
             while ((1 << w) <= g.bm[b]) ++w;
             if (bit % 64 + w > 64) bit += 64 - bit % 64;  // a field never straddles two words
@@ -304,6 +326,7 @@ struct Solver {
     }
     void add_bond(int b, int delta) {  // signed change of the packed residual of bond b
         int o = off[b];
+        if (o < 0) return;
         uint64_t v = uint64_t(delta < 0 ? -delta : delta) << (o % 64);
         if (delta < 0) key[o / 64] -= v; else key[o / 64] += v;
     }
