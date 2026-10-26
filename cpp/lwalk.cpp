@@ -3,8 +3,10 @@
 // A walk starts at a loose end, alternates segment traversals and bonds (reference adjacencies
 // and junctions), and uses every segment at most its copy number and every bond at most its
 // multiplicity.  A walk's length is its number of segment traversals, and its letters are the
-// segment name when the segment is entered at its start (node 2i) and the lower-cased name when
-// entered at its end (node 2i+1).  bfbdist.breakpoint_graph writes the GRAPH.txt format.
+// segment id when the segment is entered at its start (node 2i) and -id (the lower-cased name in
+// the older format) when
+// entered at its end (node 2i+1).  GRAPH is the breakpoint graph format of docs/file_formats.md
+// (start labels X.L / X.R), or the older segments/bonds/starts format.
 //
 // Dynamic program over residual states.  A state is (start, current exit node, remaining bond
 // multiplicities); the remaining segment copy numbers follow from these, because every segment
@@ -62,6 +64,7 @@ struct Graph {
     std::vector<int> starts;
     std::vector<std::string> start_label;
     std::string header;
+    bool signed_ids = false;  // graph format: reverse traversals print as -id
 };
 
 static std::string rc_token(const std::string& t) {
@@ -73,6 +76,18 @@ static std::string rc_token(const std::string& t) {
     return chrom + ":" + b + "-" + a + "[" + strand + "]";
 }
 
+static std::vector<std::string> split_tabs(const std::string& line) {
+    std::vector<std::string> f;
+    size_t begin = 0;
+    while (true) {
+        size_t stop = line.find('\t', begin);
+        f.push_back(line.substr(begin, stop == std::string::npos ? std::string::npos : stop - begin));
+        if (stop == std::string::npos) break;
+        begin = stop + 1;
+    }
+    return f;
+}
+
 static Graph read_graph(const std::string& path) {
     std::ifstream in(path);
     if (!in) throw std::runtime_error("cannot read " + path);
@@ -80,42 +95,100 @@ static Graph read_graph(const std::string& path) {
     std::string line, word;
     std::map<std::pair<int, int>, int> merged, foldback;
     std::vector<std::pair<int, int>> order;
+    auto add_bond = [&](int a, int b, int m, int fb) {
+        auto key = std::make_pair(std::min(a, b), std::max(a, b));
+        if (!merged.count(key)) order.push_back(key);
+        merged[key] += m;
+        foldback[key] = foldback.count(key) ? std::max(foldback[key], fb) : fb;
+    };
+    std::vector<std::string> lines;
     while (std::getline(in, line)) {
-        if (line.empty()) continue;
-        if (line[0] == '#') { g.header = line; continue; }
-        std::istringstream ls(line);
-        ls >> word;
-        int n = 0;
-        ls >> n;
-        if (word == "segments") {
-            g.S = n;
-            for (int i = 0; i < n; ++i) {
-                std::getline(in, line);
-                std::istringstream s(line);
-                std::string nm, tk;
-                int c;
-                s >> nm >> c >> tk;
-                g.name.push_back(nm); g.cap.push_back(c); g.fwd.push_back(tk); g.rev.push_back(rc_token(tk));
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+    }
+    bool tsv = false;
+    for (const std::string& l : lines) {
+        if (l.empty() || l[0] == '#') continue;
+        tsv = l.rfind("H\t", 0) == 0;
+        break;
+    }
+    if (tsv) {
+        g.signed_ids = true;
+        // The breakpoint graph format of docs/file_formats.md. Segment i has node 2i at X.L
+        // and 2i+1 at X.R; a free end is a start labeled with its segment end.
+        std::map<std::string, int> index;
+        std::vector<std::vector<std::string>> rest;
+        for (const std::string& l : lines) {
+            if (l.empty() || l[0] == '#') continue;
+            std::vector<std::string> f = split_tabs(l);
+            if (f[0] == "S") {
+                if (f.size() < 7) throw std::runtime_error("bad S record: " + l);
+                index[f[1]] = g.S++;
+                g.name.push_back(f[1]);
+                g.cap.push_back(std::stoi(f[6]));
+                std::string tk = f[2] == "*" ? f[1]
+                                 : f[5] == "+" ? f[2] + ":" + f[3] + "-" + f[4] + "[R]"
+                                               : f[2] + ":" + f[4] + "-" + f[3] + "[C]";
+                g.fwd.push_back(tk);
+                g.rev.push_back(f[2] == "*" ? f[1] : rc_token(tk));
+            } else {
+                rest.push_back(f);
             }
-        } else if (word == "bonds") {
-            for (int i = 0; i < n; ++i) {
-                std::getline(in, line);
-                std::istringstream s(line);
-                int a, b, m, fb = 0;
-                std::string nm;
-                s >> a >> b >> m >> nm >> fb;
-                auto key = std::make_pair(std::min(a, b), std::max(a, b));
-                if (!merged.count(key)) order.push_back(key);
-                merged[key] += m;
-                foldback[key] = foldback.count(key) ? std::max(foldback[key], fb) : fb;
-            }
-        } else if (word == "starts") {
-            for (int i = 0; i < n; ++i) {
-                std::getline(in, line);
-                std::istringstream s(line);
-                int v; std::string lab;
-                s >> v >> lab;
-                g.starts.push_back(v); g.start_label.push_back(lab);
+        }
+        auto node = [&](const std::string& end) {
+            size_t dot = end.rfind('.');
+            auto it = index.find(end.substr(0, dot));
+            if (dot == std::string::npos || it == index.end())
+                throw std::runtime_error("unknown segment end " + end);
+            return 2 * it->second + (end.substr(dot + 1) == "R" ? 1 : 0);
+        };
+        for (const auto& f : rest) {
+            if (f[0] == "R") add_bond(node(f[1]), node(f[2]), std::stoi(f[3]), 0);
+            else if (f[0] == "J") add_bond(node(f[2]), node(f[3]), std::stoi(f[4]), std::stoi(f[5]));
+            else if (f[0] == "F") { g.starts.push_back(node(f[1])); g.start_label.push_back(f[1]); }
+        }
+    } else {
+        // The older segments/bonds/starts format.
+        size_t k = 0;
+        auto next = [&](std::string& out) {
+            if (k >= lines.size()) return false;
+            out = lines[k++];
+            return true;
+        };
+        while (next(line)) {
+            if (line.empty()) continue;
+            if (line[0] == '#') { g.header = line; continue; }
+            std::istringstream ls(line);
+            ls >> word;
+            int n = 0;
+            ls >> n;
+            if (word == "segments") {
+                g.S = n;
+                for (int i = 0; i < n; ++i) {
+                    next(line);
+                    std::istringstream s(line);
+                    std::string nm, tk;
+                    int c;
+                    s >> nm >> c >> tk;
+                    g.name.push_back(nm); g.cap.push_back(c); g.fwd.push_back(tk); g.rev.push_back(rc_token(tk));
+                }
+            } else if (word == "bonds") {
+                for (int i = 0; i < n; ++i) {
+                    next(line);
+                    std::istringstream s(line);
+                    int a, b, m, fb = 0;
+                    std::string nm;
+                    s >> a >> b >> m >> nm >> fb;
+                    add_bond(a, b, m, fb);
+                }
+            } else if (word == "starts") {
+                for (int i = 0; i < n; ++i) {
+                    next(line);
+                    std::istringstream s(line);
+                    int v; std::string lab;
+                    s >> v >> lab;
+                    g.starts.push_back(v); g.start_label.push_back(lab);
+                }
             }
         }
     }
@@ -262,6 +335,7 @@ struct Solver {
 static std::string letter(const Graph& g, int x) {
     const std::string& n = g.name[x >> 1];
     if ((x & 1) == 0) return n;
+    if (g.signed_ids) return "-" + n;
     std::string l = n;
     for (auto& c : l) c = char(std::tolower(c));
     return l;

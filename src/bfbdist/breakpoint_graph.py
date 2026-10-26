@@ -124,6 +124,49 @@ class BreakpointGraph:
                 reference[e] = mu
         return cls(copy_numbers, junctions, reference, start, end)
 
+    def to_file(self, names=None, foldback_span=FOLDBACK_SPAN, header=None):
+        """Return the graph as a :class:`bfbdist.graph_file.GraphFile`.
+
+        ``names`` maps a forward segment to its id, by default ``1``, ``2``,
+        ... in order of first occurrence. A segment without coordinates (a
+        letter) is written with ``*`` coordinates.
+        """
+        from bfbdist.graph_construction import segment_ids
+        from bfbdist.graph_file import GraphFile, GraphSegment
+
+        segments = list(self.copy_numbers)
+        if names is None:
+            names = dict(zip(segments, segment_ids(len(segments))))
+
+        def end(v):
+            return f"{names[v[0]]}.{'L' if v[1] == 'h' else 'R'}"
+
+        def is_foldback(edge):
+            u = next(iter(edge))
+            v = _other(edge, u)
+            if u[1] != v[1] or not hasattr(u[0], "chr") or u[0].chr != v[0].chr:
+                return False
+            return abs(_coordinate(u) - _coordinate(v)) <= foldback_span
+
+        graph = GraphFile(header=dict(header or {}))
+        for s in segments:
+            if hasattr(s, "chr"):
+                graph.segments.append(GraphSegment(
+                    names[s], s.chr, min(s.start, s.end), max(s.start, s.end),
+                    "-" if s.start > s.end else "+", self.copy_numbers[s]))
+            else:
+                graph.segments.append(GraphSegment(names[s], "*", 0, 0, "+", self.copy_numbers[s]))
+        for e, m in self.reference.items():
+            u = next(iter(e))
+            graph.reference.append((end(u), end(_other(e, u)), m))
+        for k, (e, m) in enumerate(self.junctions.items()):
+            u = next(iter(e))
+            graph.junctions.append((f"j{k}", end(u), end(_other(e, u)), m, int(is_foldback(e))))
+        for v, count in Counter([self.start, self.end]).items():
+            graph.free_ends.append((end(v), count))
+        graph.validate()
+        return graph
+
     def write_lwalk(self, path, names=None, foldback_span=FOLDBACK_SPAN):
         """Write the graph in the input format of ``cpp/lwalk``.
 

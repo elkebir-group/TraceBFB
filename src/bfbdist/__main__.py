@@ -107,6 +107,34 @@ def handle_bfbdist(args):
     print(graph.calculate_bfb_distance())
 
 
+def handle_graph(args):
+    """Build the breakpoint graph of the regions and write graph.tsv (and subpaths.tsv)."""
+    import os
+
+    from bfbdist.graph_construction import build_graph
+
+    reads = []
+    for spec in args.reads:
+        name, sep, bam = spec.partition("=")
+        if not sep or not name or not bam:
+            sys.exit(f"Error: --reads expects SET=BAM, got {spec!r}")
+        reads.append((name, bam))
+    header = {"locus": args.name} if args.name else {}
+    try:
+        graph, rows = build_graph(
+            args.region, args.junctions, args.normal_junctions, args.bam, args.normal_bam,
+            args.haploid_depth, cn_files=args.cn, reads=reads, use_subpaths=args.use_subpaths,
+            cytoband=args.cytoband, header=header)
+    except (OSError, ValueError) as error:
+        sys.exit(f"Error: {error}")
+    os.makedirs(args.out, exist_ok=True)
+    graph.write(os.path.join(args.out, "graph.tsv"))
+    if reads:
+        with open(os.path.join(args.out, "subpaths.tsv"), "w", encoding="utf-8") as output:
+            output.write("string\treads\tread_set\n")
+            output.write("".join(f"{w}\t{n}\t{r}\n" for w, n, r in rows))
+
+
 def main():
     """Parse command-line arguments and dispatch the selected command."""
     parser = argparse.ArgumentParser(description="BFBdist command line utility")
@@ -129,6 +157,27 @@ def main():
     dist_parser.add_argument("-o", "--out", type=str, required=True)
     dist_parser.add_argument("--colored", action="store_true")
     dist_parser.set_defaults(func=handle_bfbdist)
+
+    graph_parser = subparsers.add_parser(
+        "graph", help="breakpoint graph of genomic regions from long reads")
+    graph_parser.add_argument("--region", action="append", required=True,
+                              help="chrom:start-end, once per window")
+    graph_parser.add_argument("--junctions", required=True, help="tumor junction TSV")
+    graph_parser.add_argument("--normal-junctions", required=True, help="normal junction TSV")
+    graph_parser.add_argument("--bam", required=True, help="tumor BAM (depth)")
+    graph_parser.add_argument("--normal-bam", required=True, help="normal BAM (depth)")
+    graph_parser.add_argument("--haploid-depth", type=float, required=True,
+                              help="tumor read depth of one copy")
+    graph_parser.add_argument("--cn", action="append", default=[],
+                              help="copy-number BED (copy number in column 5); summed")
+    graph_parser.add_argument("--reads", action="append", default=[], metavar="SET=BAM",
+                              help="read set for subpath constraints")
+    graph_parser.add_argument("--use-subpaths", action="store_true",
+                              help="use the subpath constraints as bounds in the fit")
+    graph_parser.add_argument("--cytoband", help="UCSC cytoband file (centromere filter)")
+    graph_parser.add_argument("--name", help="locus name for the header")
+    graph_parser.add_argument("-o", "--out", required=True, help="output directory")
+    graph_parser.set_defaults(func=handle_graph)
 
     args = parser.parse_args()
     args.func(args)
