@@ -7,24 +7,27 @@ of one copy), optionally copy-number calls (BED, copy number in column 5, summed
 over files, e.g. the two haplotypes of Wakhan), and read sets for subpath
 constraints.
 
-1. Junctions: tumor calls with at least min_support reads, with both ends in the
+- Junctions: tumor calls with at least min_support reads, with both ends in the
    regions, not within centromere_margin of a centromere (with a cytoband file),
    not a short deletion (R end then L end, span <= max_small_deletion), and
    somatic (no normal call with both ends within germline_tol, same sides). The
    support of a junction is that of the best-supported tumor call within
-   cluster_window of both ends.
-2. Segments: every region is cut at the junction ends inside it, and the
+   cluster_window of both ends. A junction is a fold-back when its two ends are of
+   the same kind on one chromosome within foldback_span, unless an opposite-side
+   junction of that shape has both ends within reciprocal_tol (then the two are an
+   inversion).
+- Segments: every region is cut at the junction ends inside it, and the
    segments get the ids 1, 2, ... in genomic order.
-3. Depth: bins of the regions; a bin is usable when its normal depth is within
+- Depth: bins of the regions; a bin is usable when its normal depth is within
    mapp_tol of the median. A segment with at least 3 usable bins gets the median
    of tumor/normal x median normal; a shorter one the tumor per-base depth,
    normal-corrected when the normal is within 25% of the median.
-4. Subpath constraints: the oriented segments every read of every read set
+- Subpath constraints: the oriented segments every read of every read set
    crosses (a read with any alignment in the regions, rebuilt from its SA tag), split where a block lies outside the regions, at an unaligned gap of
    more than max_gap, and at a step that is neither a reference edge nor a
    junction. A constraint is written in the reading with more forward segments
    (ties: the smaller reading as integers).
-5. Fit: integer copy numbers and multiplicities, balanced, every junction at
+- Fit: integer copy numbers and multiplicities, balanced, every junction at
    least 1, an even number (at least 2) of free ends at chain ends. Objective:
    depth term + Poisson deviance of the junction reads + a prior on the depth
    per copy around the scale of the copy-number calls; the depth per copy is
@@ -50,7 +53,7 @@ _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 
 DEFAULTS = dict(
     min_support=5, germline_tol=200, max_small_deletion=600, centromere_margin=1_000_000,
-    cluster_window=50, foldback_span=FOLDBACK_SPAN,
+    cluster_window=50, foldback_span=FOLDBACK_SPAN, reciprocal_tol=10_000,
     bin=2000, depth_mapq=10, mapp_tol=0.15, trim=2000,
     read_mapq=20, minseg=200, merge=1000, max_gap=2000, pad=1000,
     lo=0.75, hi=1.25, step=0.0125, starts=16, prior_sd=0.10, tol=10_000, seed=1,
@@ -71,7 +74,7 @@ def parse_region(text):
     return chrom, int(lo), int(hi)
 
 
-# ---------------------------------------------------------------- 1. junctions
+# ---------------------------------------------------------------- junctions
 
 def read_calls(path):
     """[(end a, end b, support)] with ends (chrom, pos, side), by column name."""
@@ -88,8 +91,11 @@ def read_calls(path):
                     raise ValueError(f"{path}: missing columns {sorted(missing)}")
                 continue
             get = lambda name: f[columns[name]]  # noqa: E731
-            out.append(((get("chrA"), int(get("posA")), get("sideA")),
-                        (get("chrB"), int(get("posB")), get("sideB")), int(get("support"))))
+            a = (get("chrA"), int(get("posA")), get("sideA"))
+            b = (get("chrB"), int(get("posB")), get("sideB"))
+            if a[0] == b[0] and a[1] > b[1]:  # the filters read a same-chromosome call left to right
+                a, b = b, a
+            out.append((a, b, int(get("support"))))
     return out
 
 
@@ -105,7 +111,7 @@ def centromeres(path):
 
 
 def somatic_junctions(tumor, normal, windows, p, cytoband=None):
-    """Step 1: the junctions of the regions, as dicts with a, b, support."""
+    """Junctions: the junctions of the regions, as dicts with a, b, support."""
     cen = centromeres(cytoband) if cytoband else {}
     tol = p["germline_tol"]
     normal_ends = defaultdict(list)
@@ -163,10 +169,10 @@ def somatic_junctions(tumor, normal, windows, p, cytoband=None):
     return out
 
 
-# ---------------------------------------------------------------- 2. segments
+# ---------------------------------------------------------------- segments
 
 def cut_segments(windows, junctions):
-    """Step 2: segments (dicts name, chrom, cen, tel, window) and the junction ends."""
+    """Segments: the segments (dicts name, chrom, cen, tel, window) and the junction ends."""
     segs, seg_at = [], {}
     for i, (c, lo, hi) in enumerate(windows):
         cuts = sorted({lo, hi} | {e[1] for j in junctions for e in (j["a"], j["b"])
@@ -189,7 +195,7 @@ def chains(segs):
     return [out[w] for w in sorted(out)]
 
 
-# ---------------------------------------------------------------- 3. depth
+# ---------------------------------------------------------------- depth
 
 def _bedcov(bam, bins, mapq):
     text = "".join(f"{c}\t{s}\t{e}\n" for c, s, e in bins)
@@ -211,11 +217,13 @@ def _base_depth(bam, c, lo, hi, mapq):
 
 
 def segment_depth(windows, segs, tumor_bam, normal_bam, p):
-    """Step 3: {segment: corrected tumor depth}."""
+    """Depth: {segment: corrected tumor depth}."""
     size = p["bin"]
     bins = [(c, s, s + size) for c, lo, hi in windows for s in range(lo, hi - size + 1, size)]
     T, N = _bedcov(tumor_bam, bins, p["depth_mapq"]), _bedcov(normal_bam, bins, p["depth_mapq"])
-    med = statistics.median(N.values())
+    med = statistics.median(N.values()) if N else 0
+    if med <= 0:
+        raise ValueError(f"{normal_bam}: no normal read depth over the regions (MAPQ >= {p['depth_mapq']})")
     good = {k for k, v in N.items() if abs(v - med) <= p["mapp_tol"] * med}
     out = {}
     for s in segs:
@@ -227,11 +235,11 @@ def segment_depth(windows, segs, tumor_bam, normal_bam, p):
         else:
             td = _base_depth(tumor_bam, c, lo, hi, p["depth_mapq"])
             nd = _base_depth(normal_bam, c, lo, hi, p["depth_mapq"])
-            out[s["name"]] = td / nd * med if abs(nd - med) <= 0.25 * med else td
+            out[s["name"]] = td / nd * med if nd > 0 and abs(nd - med) <= 0.25 * med else td
     return out
 
 
-# ---------------------------------------------------------------- 4. subpaths
+# ---------------------------------------------------------------- subpaths
 
 class Locus:
     """Segments, chains and edges of the regions, for walking reads."""
@@ -314,7 +322,7 @@ def _tokens(locus, block):
 
 
 def subpaths(locus, windows, bam, p):
-    """Step 4: Counter {tokens (canonical orientation): reads} of one read set."""
+    """Subpath constraints: Counter {tokens (written orientation): reads} of one read set."""
     words, seen = Counter(), set()
     with pysam.AlignmentFile(bam) as handle:
         for c, lo, hi in windows:
@@ -344,7 +352,7 @@ def subpaths(locus, windows, bam, p):
     return words
 
 
-# ---------------------------------------------------------------- 5. fit
+# ---------------------------------------------------------------- fit
 
 def _cn_scale(locus, junctions, depth, cn_files, line_unit, p):
     """Depth per copy on the scale of the copy-number calls (the prior's center)."""
@@ -388,7 +396,7 @@ def _cn_scale(locus, junctions, depth, cn_files, line_unit, p):
 
 
 def fit(locus, junctions, depth, line_unit, scale, bounds, p):
-    """Step 5: the best graph (cn, mult, ref, ends) over depths per copy."""
+    """Fit: the best graph (cn, mult, ref, ends) over depths per copy."""
     edge_lb, seg_lb = bounds
     use_bounds = bounds != (Counter(), Counter())
     CH = locus.chains
@@ -448,6 +456,8 @@ def fit(locus, junctions, depth, line_unit, scale, bounds, p):
 
     def shape_of(x):
         if x not in shape:
+            if len(shape) >= 50_000:  # bounded: large loci visit millions of candidates
+                shape.clear()
             r = None
             if all(v >= b for v, b in zip(x, lb)):
                 res = propagate(x[:nj], x[nj:])
@@ -527,6 +537,25 @@ def fit(locus, junctions, depth, line_unit, scale, bounds, p):
 
 # ---------------------------------------------------------------- driver
 
+def foldback_flags(junctions, p):
+    """{name: 0/1}: a junction is a fold-back when it has the fold-back shape (is_foldback) and is
+    not half of a reciprocal inversion: no other fold-back-shaped junction of the opposite side has
+    both ends within reciprocal_tol of its ends."""
+    def shape(j):
+        return is_foldback(j["a"], j["b"], p["foldback_span"])
+
+    def span(j):
+        return sorted((j["a"][1], j["b"][1]))
+
+    out = {}
+    for j in junctions:
+        out[j["name"]] = int(shape(j) and not any(
+            o is not j and shape(o) and o["a"][0] == j["a"][0] and o["a"][2] != j["a"][2]
+            and all(abs(x - y) <= p["reciprocal_tol"] for x, y in zip(span(o), span(j)))
+            for o in junctions))
+    return out
+
+
 def _bounds(locus, words):
     """Lower bounds (edges, segments): every constraint is present in the graph."""
     edge_lb, seg_lb = Counter(), Counter()
@@ -542,7 +571,7 @@ def _bounds(locus, words):
 def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_bam,
                 haploid_depth, cn_files=(), reads=(), use_subpaths=False, cytoband=None,
                 header=None, **params):
-    """Steps 1-5. Returns (GraphFile, subpath rows [(string, reads, read_set)])."""
+    """Junctions, segments, depth, subpath constraints and fit. Returns (GraphFile, subpath rows [(string, reads, read_set)])."""
     p = dict(DEFAULTS, **params)
     windows = sorted((parse_region(r) for r in regions), key=lambda w: (chrom_key(w[0]), w[1]))
     junctions = somatic_junctions(read_calls(junctions_tsv), read_calls(normal_junctions_tsv),
@@ -569,10 +598,7 @@ def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_
     def end(name, e):
         return f"{name}.{side[e]}"
 
-    def foldback(a, b):
-        sa, sb = locus.seg[a[0]], locus.seg[b[0]]
-        return int(is_foldback((sa["chrom"], sa[a[1]], a[1]), (sb["chrom"], sb[b[1]], b[1]),
-                               p["foldback_span"]))
+    flags = foldback_flags(junctions, p)
 
     graph = GraphFile(header=dict(header or {}, haploid_depth=f"{best['unit']:.4f}"))
     graph.segments = [GraphSegment(s["name"], s["chrom"], s["cen"], s["tel"], "+", cn[s["name"]])
@@ -584,7 +610,7 @@ def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_
     for j in junctions:
         if mult[j["name"]] > 0:
             graph.junctions.append((j["name"], end(*j["end_a"]), end(*j["end_b"]),
-                                    mult[j["name"]], foldback(j["end_a"], j["end_b"])))
+                                    mult[j["name"]], flags[j["name"]]))
     order = {s["name"]: k for k, s in enumerate(segs)}
     for e, k in sorted(free.items(), key=lambda x: (order[x[0].split(".")[0]], x[0])):
         name, which = e.split(".")

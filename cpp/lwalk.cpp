@@ -152,6 +152,8 @@ static Graph read_graph(const std::string& path) {
             return 2 * it->second + (end.substr(dot + 1) == "R" ? 1 : 0);
         };
         for (const auto& f : rest) {
+            const size_t need = f[0] == "R" ? 4 : f[0] == "J" ? 6 : f[0] == "F" ? 3 : 0;
+            if (f.size() < need) throw std::runtime_error("bad " + f[0] + " record: too few fields");
             if (f[0] == "R") add_bond(node(f[1]), node(f[2]), std::stoi(f[3]), 0);
             else if (f[0] == "J") add_bond(node(f[2]), node(f[3]), std::stoi(f[4]), std::stoi(f[5]));
             else if (f[0] == "F") { g.starts.push_back(node(f[1])); g.start_label.push_back(f[1]); }
@@ -395,6 +397,9 @@ int main(int argc, char** argv) {
         std::vector<std::pair<int, u128>> per(starts.size(), {0, 0});
         long total_trav = 0;
         for (int c : g.cap) total_trav += c;
+        if (MAX_FB && total_trav > 0xfff)
+            throw std::runtime_error("--max-foldbacks supports at most 4095 traversals, the graph has " +
+                                     std::to_string(total_trav));
         for (size_t i = 0; i < starts.size(); ++i) {
             int s0 = starts[i];
             if (!sv.crem[s0 >> 1]) continue;

@@ -51,5 +51,16 @@ class BreakpointGraphTests(unittest.TestCase):
                                          ["s0", "s1", "s2", "-s2", "-s1"])
 
 
+class FoldbackTests(unittest.TestCase):
+    def test_reverse_read_segment_uses_genomic_sides(self):
+        from bfbdist.breakpoint_graph import _foldback
+        fwd = Sequence.from_string("chr1:100-200[R]")[0]
+        rev = Sequence.from_string("chr1:400-300[R]")[0]  # read right to left: start 400 > end 300
+        # end of fwd (genomic R, 200) and start of rev (genomic R, 400): a fold-back
+        self.assertTrue(_foldback(frozenset({(fwd, "t"), (rev, "h")}), 50_000))
+        # end of fwd (R) and end of rev (genomic L, 300): not a fold-back
+        self.assertFalse(_foldback(frozenset({(fwd, "t"), (rev, "t")}), 50_000))
+
+
 if __name__ == "__main__":
     unittest.main()

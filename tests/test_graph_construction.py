@@ -7,8 +7,8 @@ from collections import Counter
 from pathlib import Path
 
 from bfbdist.graph_construction import (
-    DEFAULTS, Locus, _canonical, chrom_key, cut_segments, fit, read_calls, segment_ids,
-    somatic_junctions,
+    DEFAULTS, Locus, _canonical, chrom_key, cut_segments, fit, foldback_flags, read_calls,
+    segment_ids, somatic_junctions,
 )
 from bfbdist.graph_file import GraphFile, GraphSegment
 
@@ -53,6 +53,23 @@ class JunctionTests(unittest.TestCase):
             path.write_text("chrA\tposA\tsideA\tchrB\tposB\tsideB\tsupport\n"
                             "chr4\t3000\tL\tchr4\t3500\tL\t16\n\n")
             self.assertEqual(read_calls(path), [(("chr4", 3000, "L"), ("chr4", 3500, "L"), 16)])
+
+    def test_inversion_halves_are_not_fold_backs(self):
+        # R-R at 3000/6000 and L-L at 3010/6020: an inversion; L-L at 7000/7500 alone: a fold-back
+        tumor = [call((3000, "R"), (6000, "R"), 9), call((3010, "L"), (6020, "L"), 9),
+                 call((7000, "L"), (7500, "L"), 9)]
+        js = somatic_junctions(tumor, [], WINDOW, DEFAULTS)
+        self.assertEqual(foldback_flags(js, dict(DEFAULTS, reciprocal_tol=100)),
+                         {"j0": 0, "j1": 0, "j2": 1})
+
+    def test_same_chromosome_call_is_read_left_to_right(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "calls.tsv"
+            path.write_text("chrA\tposA\tsideA\tchrB\tposB\tsideB\tsupport\n"
+                            "chr4\t4300\tL\tchr4\t4000\tR\t30\n")
+            calls = read_calls(path)
+        self.assertEqual(calls, [(("chr4", 4000, "R"), ("chr4", 4300, "L"), 30)])
+        self.assertEqual(somatic_junctions(calls, [], WINDOW, DEFAULTS), [])  # small deletion
 
     def test_chromosome_order(self):
         names = ["chrX", "chr10", "chr2", "2", "1", "chrM", "chrY"]

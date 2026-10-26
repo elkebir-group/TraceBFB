@@ -194,10 +194,18 @@ def _coordinate(node):
     return segment.start if side == "h" else segment.end
 
 
+def _genomic_kind(node):
+    """L or R: the genomic side of a node; a segment read right to left (start > end) has its
+    start node ('h') on the right."""
+    segment, side = node
+    return "L" if (side == "h") == (segment.start <= segment.end) else "R"
+
+
 def _foldback(edge, span):
-    """Whether a junction joins two ends of the same kind on one chromosome within span bp."""
+    """Whether a junction joins two ends of the same genomic kind on one chromosome within span bp."""
     u = next(iter(edge))
     v = _other(edge, u)
     if not (hasattr(u[0], "chr") and hasattr(v[0], "chr")):
         return False
-    return is_foldback((u[0].chr, _coordinate(u), u[1]), (v[0].chr, _coordinate(v), v[1]), span)
+    return is_foldback((u[0].chr, _coordinate(u), _genomic_kind(u)),
+                       (v[0].chr, _coordinate(v), _genomic_kind(v)), span)
