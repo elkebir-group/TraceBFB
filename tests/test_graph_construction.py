@@ -7,7 +7,8 @@ from collections import Counter
 from pathlib import Path
 
 from bfbdist.graph_construction import (
-    DEFAULTS, Locus, cut_segments, fit, segment_ids, remove_background, somatic_junctions,
+    DEFAULTS, Locus, chrom_key, cut_segments, fit, read_calls, remove_background, segment_ids,
+    somatic_junctions,
 )
 from bfbdist.graph_file import GraphFile, GraphSegment
 
@@ -37,6 +38,25 @@ class JunctionTests(unittest.TestCase):
         tumor = [call((3000, "L"), (3500, "L"), 16), call((3510, "L"), (3020, "L"), 40)]
         js = somatic_junctions(tumor, [], WINDOW, DEFAULTS)
         self.assertEqual([j["support"] for j in js], [40, 40])
+
+    def test_ends_facing_out_of_the_window_are_dropped(self):
+        # an R end at the window start and an L end at its end have no segment
+        tumor = [call((1000, "R"), (3000, "R"), 16), call((9000, "L"), (7000, "L"), 16),
+                 call((1000, "L"), (3000, "L"), 16)]
+        js = somatic_junctions(tumor, [], WINDOW, DEFAULTS)
+        self.assertEqual([(j["a"][1], j["b"][1]) for j in js], [(1000, 3000)])
+        cut_segments(WINDOW, js)
+
+    def test_blank_lines_are_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "calls.tsv"
+            path.write_text("chrA\tposA\tsideA\tchrB\tposB\tsideB\tsupport\n"
+                            "chr4\t3000\tL\tchr4\t3500\tL\t16\n\n")
+            self.assertEqual(read_calls(path), [(("chr4", 3000, "L"), ("chr4", 3500, "L"), 16)])
+
+    def test_chromosome_order(self):
+        names = ["chrX", "chr10", "chr2", "2", "1", "chrM", "chrY"]
+        self.assertEqual(sorted(names, key=chrom_key), ["1", "chr2", "2", "chr10", "chrX", "chrY", "chrM"])
 
 
 class SegmentTests(unittest.TestCase):

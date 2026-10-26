@@ -15,12 +15,9 @@ import heapq
 import itertools
 
 from bfbdist.distance import _predecessors
+from bfbdist.graph_file import FOLDBACK_SPAN
 from bfbdist.history import State, validate_sources
 from bfbdist.sequence import Sequence
-
-# The fold-back geometry of the junction screen, and the default of
-# ``nbfb --foldback-span``.
-FOLDBACK_SPAN = 50_000
 
 
 def foldback_join(u, v, span=FOLDBACK_SPAN):

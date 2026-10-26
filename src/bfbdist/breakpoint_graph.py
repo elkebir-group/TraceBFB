@@ -15,8 +15,7 @@ and samples the longest walks of a graph written by
 
 from collections import Counter
 
-# The fold-back geometry of the junction screen.
-FOLDBACK_SPAN = 50_000
+from bfbdist.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
 
 
 def _is_forward(segment):
@@ -131,22 +130,12 @@ class BreakpointGraph:
         ... in order of first occurrence. A segment without coordinates (a
         letter) is written with ``*`` coordinates.
         """
-        from bfbdist.graph_construction import segment_ids
-        from bfbdist.graph_file import GraphFile, GraphSegment
-
         segments = list(self.copy_numbers)
         if names is None:
             names = dict(zip(segments, segment_ids(len(segments))))
 
         def end(v):
             return f"{names[v[0]]}.{'L' if v[1] == 'h' else 'R'}"
-
-        def is_foldback(edge):
-            u = next(iter(edge))
-            v = _other(edge, u)
-            if u[1] != v[1] or not hasattr(u[0], "chr") or u[0].chr != v[0].chr:
-                return False
-            return abs(_coordinate(u) - _coordinate(v)) <= foldback_span
 
         graph = GraphFile(header=dict(header or {}))
         for s in segments:
@@ -161,7 +150,8 @@ class BreakpointGraph:
             graph.reference.append((end(u), end(_other(e, u)), m))
         for k, (e, m) in enumerate(self.junctions.items()):
             u = next(iter(e))
-            graph.junctions.append((f"j{k}", end(u), end(_other(e, u)), m, int(is_foldback(e))))
+            graph.junctions.append((f"j{k}", end(u), end(_other(e, u)), m,
+                                    int(_foldback(e, foldback_span))))
         for v, count in Counter([self.start, self.end]).items():
             graph.free_ends.append((end(v), count))
         graph.validate()
@@ -184,13 +174,6 @@ class BreakpointGraph:
         def node(v):
             return 2 * index[v[0]] + (0 if v[1] == "h" else 1)
 
-        def is_foldback(edge):
-            u = next(iter(edge))
-            v = _other(edge, u)
-            if u[1] != v[1] or not hasattr(u[0], "chr") or u[0].chr != v[0].chr:
-                return False
-            return abs(_coordinate(u) - _coordinate(v)) <= foldback_span
-
         lines = [f"segments {len(segments)}"]
         lines += [f"{names[s]} {self.copy_numbers[s]} {s}" for s in segments]
         bonds = []
@@ -198,7 +181,7 @@ class BreakpointGraph:
             for k, (e, m) in enumerate(edges.items()):
                 u = next(iter(e))
                 v = _other(e, u)
-                fb = int(kind == "junction" and is_foldback(e))
+                fb = int(kind == "junction" and _foldback(e, foldback_span))
                 bonds.append(f"{node(u)} {node(v)} {m} {kind}{k} {fb}")
         lines += [f"bonds {len(bonds)}"] + bonds
         lines += ["starts 1", f"{node(self.start)} {names[self.start[0]]}.{self.start[1]}"]
@@ -209,3 +192,12 @@ class BreakpointGraph:
 def _coordinate(node):
     segment, side = node
     return segment.start if side == "h" else segment.end
+
+
+def _foldback(edge, span):
+    """Whether a junction joins two ends of the same kind on one chromosome within span bp."""
+    u = next(iter(edge))
+    v = _other(edge, u)
+    if not (hasattr(u[0], "chr") and hasattr(v[0], "chr")):
+        return False
+    return is_foldback((u[0].chr, _coordinate(u), u[1]), (v[0].chr, _coordinate(v), v[1]), span)

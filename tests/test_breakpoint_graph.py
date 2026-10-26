@@ -45,6 +45,10 @@ class BreakpointGraphTests(unittest.TestCase):
                     self.assertIn(str(target_seq), walks)
                     lengths = {len(w.split(";")) for w in walks}
                     self.assertEqual(lengths, {len(target)})
+                    if target == "ABCcb":
+                        # default names s0, s1, ... have no lower case: reverse is -name
+                        self.assertEqual(Path(f"{prefix}.walks.txt").read_text().split(),
+                                         ["s0", "s1", "s2", "-s2", "-s1"])
 
 
 if __name__ == "__main__":

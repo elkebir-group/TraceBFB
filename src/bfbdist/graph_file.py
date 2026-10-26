@@ -10,6 +10,20 @@ from dataclasses import dataclass, field
 
 VERSION = "1"
 
+# The fold-back geometry of the junction screen, and the default of `nbfb --foldback-span`.
+FOLDBACK_SPAN = 50_000
+
+
+def segment_ids(n):
+    """1, 2, ..., n: the segment ids. The reverse complement of segment k is -k."""
+    return [str(k) for k in range(1, n + 1)]
+
+
+def is_foldback(a, b, span=FOLDBACK_SPAN):
+    """Whether a junction between ends a and b, each (chrom, position, kind), is a fold-back:
+    two ends of the same kind on one chromosome at most span bp apart."""
+    return a[2] == b[2] and a[0] == b[0] and abs(a[1] - b[1]) <= span
+
 
 @dataclass
 class GraphSegment:

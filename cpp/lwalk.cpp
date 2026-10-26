@@ -3,9 +3,8 @@
 // A walk starts at a loose end, alternates segment traversals and bonds (reference adjacencies
 // and junctions), and uses every segment at most its copy number and every bond at most its
 // multiplicity.  A walk's length is its number of segment traversals, and its letters are the
-// segment id when the segment is entered at its start (node 2i) and -id (the lower-cased name in
-// the older format) when
-// entered at its end (node 2i+1).  GRAPH is the breakpoint graph format of docs/file_formats.md
+// segment id when the segment is entered at its start (node 2i) and -id (in the older format the
+// lower-cased name, or -name when it has no lower case) when entered at its end (node 2i+1).  GRAPH is the breakpoint graph format of docs/file_formats.md
 // (start labels X.L / X.R), or the older segments/bonds/starts format.
 //
 // Dynamic program over residual states.  A state is (start, current exit node, remaining bond
@@ -67,9 +66,19 @@ struct Graph {
     bool signed_ids = false;  // graph format: reverse traversals print as -id
 };
 
+// The reverse of a name without coordinates: lower case, or -name when lower-casing changes
+// nothing (s0, 12).
+static std::string rc_name(const std::string& n) {
+    std::string l = n;
+    for (auto& c : l) c = char(std::tolower(c));
+    return l != n ? l : "-" + n;
+}
+
 static std::string rc_token(const std::string& t) {
-    // chrom:a-b[R] -> chrom:b-a[C]
-    size_t colon = t.rfind(':'), dash = t.find('-', colon), open = t.find('[', dash);
+    // chrom:a-b[R] -> chrom:b-a[C]; a token without coordinates (a letter) as rc_name
+    size_t colon = t.rfind(':');
+    if (colon == std::string::npos || t.find('[', colon) == std::string::npos) return rc_name(t);
+    size_t dash = t.find('-', colon), open = t.find('[', dash);
     std::string chrom = t.substr(0, colon), a = t.substr(colon + 1, dash - colon - 1),
                 b = t.substr(dash + 1, open - dash - 1);
     char strand = t[open + 1] == 'R' ? 'C' : 'R';
@@ -335,10 +344,7 @@ struct Solver {
 static std::string letter(const Graph& g, int x) {
     const std::string& n = g.name[x >> 1];
     if ((x & 1) == 0) return n;
-    if (g.signed_ids) return "-" + n;
-    std::string l = n;
-    for (auto& c : l) c = char(std::tolower(c));
-    return l;
+    return g.signed_ids ? "-" + n : rc_name(n);
 }
 
 int main(int argc, char** argv) {
@@ -378,6 +384,9 @@ int main(int argc, char** argv) {
             while (std::getline(ss, item, ',')) ok = ok || item == g.start_label[i];
             if (ok) { starts.push_back(g.starts[i]); labels.push_back(g.start_label[i]); }
         }
+        if (starts.empty())
+            throw std::runtime_error(starts_arg.empty() ? "the graph has no free end"
+                                                        : "no free end matches --starts " + starts_arg);
         std::set<int> start_set(starts.begin(), starts.end());
         Solver sv(g, size_t(mem_gb * 1073741824.0));
         auto t0 = std::chrono::steady_clock::now();
@@ -412,6 +421,7 @@ int main(int argc, char** argv) {
                   << " MiB, " << secs << " s\n" << std::flush;
         if (!enumerate && sample == 0) return 0;
         if (prefix.empty()) { std::cerr << "-o PREFIX is required to write walks\n"; return 2; }
+        if (total == 0) { std::cerr << "no walk from the selected starts\n"; return 3; }
         if (enumerate && total > u128(max_walks)) {
             std::cerr << "refusing to enumerate " << u128str(total) << " walks (> --max-walks " << max_walks << ")\n";
             return 4;

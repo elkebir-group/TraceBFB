@@ -20,7 +20,7 @@ constraints.
    of tumor/normal x median normal; a shorter one the tumor per-base depth,
    normal-corrected when the normal is within 25% of the median.
 4. Subpath constraints: the oriented segments every read of every read set
-   crosses, split where a block lies outside the regions, at an unaligned gap of
+   crosses (a read with any alignment in the regions, rebuilt from its SA tag), split where a block lies outside the regions, at an unaligned gap of
    more than max_gap, and at a step that is neither a reference edge nor a
    junction.
 5. Fit: integer copy numbers and multiplicities, balanced, every junction at
@@ -44,26 +44,25 @@ from collections import Counter, defaultdict
 
 import pysam
 
-from bfbdist.graph_file import GraphFile, GraphSegment
+from bfbdist.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
 
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 
 DEFAULTS = dict(
     min_support=5, germline_tol=200, max_small_deletion=600, centromere_margin=1_000_000,
-    cluster_window=50, foldback_span=50_000,
+    cluster_window=50, foldback_span=FOLDBACK_SPAN,
     bin=2000, depth_mapq=10, mapp_tol=0.15, trim=2000,
     read_mapq=20, minseg=200, merge=1000, max_gap=2000, pad=1000,
     lo=0.75, hi=1.25, step=0.0125, starts=16, prior_sd=0.10, tol=10_000, seed=1,
 )
 
 
-def segment_ids(n):
-    """1, 2, ..., n: the segment ids. The reverse complement of segment k is -k."""
-    return [str(k) for k in range(1, n + 1)]
-
-
 def chrom_key(c):
-    return int(c[3:]) if c[3:].isdigit() else 99
+    """Genomic order of chromosome names, with or without the chr prefix: 1..22, X, Y, M, rest."""
+    n = c[3:] if c.startswith("chr") else c
+    if n.isdigit():
+        return (0, int(n), "")
+    return (1, {"X": 0, "Y": 1, "M": 2, "MT": 2}.get(n, 3), n)
 
 
 def parse_region(text):
@@ -79,7 +78,7 @@ def read_calls(path):
     out, columns = [], None
     with open(path, encoding="utf-8") as handle:
         for raw in handle:
-            if raw.startswith("#"):
+            if raw.startswith("#") or not raw.strip():
                 continue
             f = raw.rstrip("\n").split("\t")
             if columns is None:
@@ -133,7 +132,11 @@ def somatic_junctions(tumor, normal, windows, p, cytoband=None):
                 and b[1] - a[1] <= p["max_small_deletion"])
 
     def inside(end):
-        return any(end[0] == c and lo <= end[1] <= hi for c, lo, hi in windows)
+        # an R end is the right end of a segment, so it needs sequence of the window to its
+        # left (pos > lo); an L end needs sequence to its right (pos < hi)
+        c, pos, side = end
+        return any(c == w and (lo < pos <= hi if side == "R" else lo <= pos < hi)
+                   for w, lo, hi in windows)
 
     by_sides = defaultdict(list)
     for a, b, n in tumor:
@@ -308,7 +311,9 @@ def subpaths(locus, windows, bam, p):
     with pysam.AlignmentFile(bam) as handle:
         for c, lo, hi in windows:
             for read in handle.fetch(region=f"{c}:{max(1, lo - p['pad'])}-{hi + p['pad']}"):
-                if read.flag & 0x904 or read.query_name in seen:
+                # a supplementary record stands for the whole read too (its SA tag lists the
+                # other alignments), so a read is kept when any of its alignments is fetched
+                if read.flag & 0x104 or read.query_name in seen:
                     continue
                 seen.add(read.query_name)
                 pieces, cur, prev = [], [], None
@@ -342,7 +347,7 @@ def _cn_scale(locus, junctions, depth, cn_files, line_unit, p):
         rows = defaultdict(list)
         with open(path, encoding="utf-8") as handle:
             for ln in handle:
-                if ln[0] == "#":
+                if not ln.strip() or ln.startswith(("#", "track", "browser")):
                     continue
                 c, s, e, _, cn = ln.split("\t")[:5]
                 rows[c].append((int(s), int(e), float(cn)))
@@ -431,6 +436,18 @@ def fit(locus, junctions, depth, line_unit, scale, bounds, p):
     lb = [max(b, 1) if i < nj else b for i, b in enumerate(lb)]
     graphs = {}
     warm = None
+    shape = {}  # x -> (cn, ref, ends, deviance) or None; independent of the depth per copy
+
+    def shape_of(x):
+        if x not in shape:
+            r = None
+            if all(v >= b for v, b in zip(x, lb)):
+                res = propagate(x[:nj], x[nj:])
+                if res is not None:
+                    r = res + (deviance(x[:nj]),)
+            shape[x] = r
+        return shape[x]
+
     n = int(round((p["hi"] - p["lo"]) / p["step"])) + 1
     for i in range(n):
         u = line_unit * (p["lo"] + i * p["step"])
@@ -442,12 +459,11 @@ def fit(locus, junctions, depth, line_unit, scale, bounds, p):
             x = tuple(x)
             if x not in cache:
                 r = None
-                if all(v >= b for v, b in zip(x, lb)):
-                    res = propagate(x[:nj], x[nj:])
-                    if res is not None:
-                        cn, ref, ends = res
-                        d = sum(min(length[s], 300000) / 1e5 * (cn[s] - obs[s]) ** 2 for s in obs)
-                        r = (d + deviance(x[:nj]), {"cn": cn, "ref": ref, "ends": ends})
+                sh = shape_of(x)
+                if sh is not None:
+                    cn, ref, ends, dev = sh
+                    d = sum(min(length[s], 300000) / 1e5 * (cn[s] - obs[s]) ** 2 for s in obs)
+                    r = (d + dev, {"cn": cn, "ref": ref, "ends": ends})
                 cache[x] = r
             return cache[x]
 
@@ -582,8 +598,8 @@ def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_
 
     def foldback(a, b):
         sa, sb = locus.seg[a[0]], locus.seg[b[0]]
-        return int(a[1] == b[1] and sa["chrom"] == sb["chrom"]
-                   and abs(sa[a[1]] - sb[b[1]]) <= p["foldback_span"])
+        return int(is_foldback((sa["chrom"], sa[a[1]], a[1]), (sb["chrom"], sb[b[1]], b[1]),
+                               p["foldback_span"]))
 
     graph = GraphFile(header=dict(header or {}, haploid_depth=f"{best['unit']:.4f}"))
     graph.segments = [GraphSegment(s["name"], s["chrom"], s["cen"], s["tel"], "+", cn[s["name"]])
