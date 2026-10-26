@@ -22,15 +22,15 @@ constraints.
 4. Subpath constraints: the oriented segments every read of every read set
    crosses (a read with any alignment in the regions, rebuilt from its SA tag), split where a block lies outside the regions, at an unaligned gap of
    more than max_gap, and at a step that is neither a reference edge nor a
-   junction.
+   junction. A constraint is written in the reading with more forward segments
+   (ties: the smaller reading as integers).
 5. Fit: integer copy numbers and multiplicities, balanced, every junction at
    least 1, an even number (at least 2) of free ends at chain ends. Objective:
    depth term + Poisson deviance of the junction reads + a prior on the depth
    per copy around the scale of the copy-number calls; the depth per copy is
    scanned over [lo, hi] x the haploid depth. With use_subpaths, every subpath
-   constraint is a lower bound.
-6. Background: the intact copies of every chain are removed, keeping at least 2
-   free ends and, with use_subpaths, every constraint that crosses a junction.
+   constraint is a lower bound. The graph is the fitted one: intact (unrearranged)
+   copies of the regions are part of it.
 """
 
 import gzip
@@ -264,6 +264,14 @@ def _rc(tokens):
     return [t[1:] if t.startswith("-") else "-" + t for t in reversed(tokens)]
 
 
+def _canonical(tokens):
+    """The reading of a constraint that is written: more forward segments, then the smaller
+    as integers (1 2 3 rather than -3 -2 -1)."""
+    def key(ts):
+        return (-sum(not t.startswith("-") for t in ts), [int(t) for t in ts])
+    return min(list(tokens), _rc(tokens), key=key)
+
+
 def _blocks(read, p):
     recs = [(read.reference_name, read.reference_start + 1, "-" if read.is_reverse else "+",
              read.cigarstring, read.mapping_quality)]
@@ -332,7 +340,7 @@ def subpaths(locus, windows, bam, p):
                 if cur:
                     pieces.append(cur)
                 for piece in pieces:
-                    words[tuple(min(piece, _rc(piece)))] += 1
+                    words[tuple(_canonical(piece))] += 1
     return words
 
 
@@ -517,47 +525,13 @@ def fit(locus, junctions, depth, line_unit, scale, bounds, p):
     return min(graphs.values(), key=lambda g: g["J"])
 
 
-# ---------------------------------------------------------------- 6. background
-
-def remove_background(locus, best, needed):
-    """Step 6: (cn, mult, ref, free ends) after the intact copies are removed."""
-    need_edge, need_seg = needed
-    CH = locus.chains
-    cn, mult, ref = dict(best["cn"]), dict(best["mult"]), dict(best["ref"])
-    ends = Counter(best["ends"])
-    background = []
-    for ch in CH:
-        b = min(ends[f"{ch[0]}.cen"], ends[f"{ch[-1]}.tel"])
-        b = min([b] + [cn[s] - need_seg[s] for s in ch])
-        b = min([b] + [ref[f"ref:{x}{y}"] - need_edge[f"ref:{x}{y}"] for x, y in zip(ch, ch[1:])])
-        background.append(max(b, 0))
-
-    def left_ends(bg):
-        out = Counter(ends)
-        for ch, b in zip(CH, bg):
-            out[f"{ch[0]}.cen"] -= b
-            out[f"{ch[-1]}.tel"] -= b
-        return +out
-
-    while sum(left_ends(background).values()) < 2 and any(background):
-        i = max(range(len(CH)), key=lambda k: (background[k], -k))
-        background[i] -= 1
-    for ch, b in zip(CH, background):
-        for s in ch:
-            cn[s] -= b
-        for x, y in zip(ch, ch[1:]):
-            ref[f"ref:{x}{y}"] -= b
-    return cn, mult, ref, left_ends(background)
-
-
 # ---------------------------------------------------------------- driver
 
-def _bounds(locus, words, junction_only):
+def _bounds(locus, words):
+    """Lower bounds (edges, segments): every constraint is present in the graph."""
     edge_lb, seg_lb = Counter(), Counter()
     for toks in words:
         used = [locus.step(a, b) for a, b in zip(toks, toks[1:])]
-        if junction_only and not any(not e.startswith("ref:") for e in used):
-            continue
         for e, k in Counter(used).items():
             edge_lb[e] = max(edge_lb[e], k)
         for s, k in Counter(locus.parse(t)[0] for t in toks).items():
@@ -568,7 +542,7 @@ def _bounds(locus, words, junction_only):
 def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_bam,
                 haploid_depth, cn_files=(), reads=(), use_subpaths=False, cytoband=None,
                 header=None, **params):
-    """Steps 1-6. Returns (GraphFile, subpath rows [(string, reads, read_set)])."""
+    """Steps 1-5. Returns (GraphFile, subpath rows [(string, reads, read_set)])."""
     p = dict(DEFAULTS, **params)
     windows = sorted((parse_region(r) for r in regions), key=lambda w: (chrom_key(w[0]), w[1]))
     junctions = somatic_junctions(read_calls(junctions_tsv), read_calls(normal_junctions_tsv),
@@ -584,12 +558,11 @@ def build_graph(regions, junctions_tsv, normal_junctions_tsv, tumor_bam, normal_
         rows += [(" ".join(w), n, name) for w, n in words.most_common()]
 
     scale = _cn_scale(locus, junctions, depth, list(cn_files), haploid_depth, p)
-    bounds = _bounds(locus, all_words, False) if use_subpaths else (Counter(), Counter())
+    bounds = _bounds(locus, all_words) if use_subpaths else (Counter(), Counter())
     best = fit(locus, junctions, depth, haploid_depth, scale, bounds, p)
     if best is None:
         raise ValueError("no balanced graph satisfies the subpath constraints")
-    needed = _bounds(locus, all_words, True) if use_subpaths else (Counter(), Counter())
-    cn, mult, ref, free = remove_background(locus, best, needed)
+    cn, mult, ref, free = best["cn"], best["mult"], best["ref"], best["ends"]
 
     side = {"cen": "L", "tel": "R"}
 

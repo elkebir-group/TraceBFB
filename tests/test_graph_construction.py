@@ -1,5 +1,5 @@
 """Graph construction (`bfbdist graph`) without BAMs: junction filters, segments,
-the fit, background removal, and the graph file."""
+the fit, and the graph file."""
 
 import tempfile
 import unittest
@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 from bfbdist.graph_construction import (
-    DEFAULTS, Locus, chrom_key, cut_segments, fit, read_calls, remove_background, segment_ids,
+    DEFAULTS, Locus, _canonical, chrom_key, cut_segments, fit, read_calls, segment_ids,
     somatic_junctions,
 )
 from bfbdist.graph_file import GraphFile, GraphSegment
@@ -67,12 +67,18 @@ class SegmentTests(unittest.TestCase):
                          [("1", 1000, 3000), ("2", 3000, 3500), ("3", 3500, 9000)])
         self.assertEqual((js[0]["end_a"], js[0]["end_b"]), (("2", "cen"), ("3", "cen")))
 
+    def test_constraint_orientation(self):
+        self.assertEqual(_canonical(["-3", "-2", "-1"]), ["1", "2", "3"])
+        self.assertEqual(_canonical(["3", "-4", "-3"]), ["3", "4", "-3"])
+        self.assertEqual(_canonical(["-3", "-2", "3"]), ["-3", "2", "3"])
+        self.assertEqual(_canonical(["-1"]), ["1"])
+
     def test_ids(self):
         self.assertEqual(segment_ids(3), ["1", "2", "3"])
 
 
 class FitTests(unittest.TestCase):
-    """HCC1937 chr4q in miniature: copies 2 3 4 2 0 over 2 intact copies."""
+    """HCC1937 chr4q in miniature: copies 2 3 4 2 0 plus 2 intact copies."""
 
     def setUp(self):
         tumor = [call((3000, "L"), (3500, "L"), 16), call((5000, "R"), (5800, "R"), 32)]
@@ -88,9 +94,7 @@ class FitTests(unittest.TestCase):
                    dict(DEFAULTS, starts=4))
         self.assertEqual(best["cn"], copies)
         self.assertEqual(best["mult"], {"j0": 1, "j1": 2})
-        cn, mult, ref, free = remove_background(self.locus, best, (Counter(), Counter()))
-        self.assertEqual(cn, {"1": 2, "2": 3, "3": 4, "4": 2, "5": 0})
-        self.assertEqual(dict(free), {"1.cen": 2})
+        self.assertEqual(best["ends"], {"1.cen": 4, "5.tel": 2})
 
     def test_infeasible_start_is_repaired(self):
         # A bound of 3 on segment 2 forces more copies than the depth suggests; the search
