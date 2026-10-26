@@ -187,7 +187,7 @@ class CLITests(unittest.TestCase):
         result = self.run_cli("--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("{simulate,distance}", result.stdout)
+        self.assertIn("{simulate,distance,graph}", result.stdout)
 
 
 if __name__ == "__main__":
