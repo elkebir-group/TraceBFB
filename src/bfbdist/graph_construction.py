@@ -55,7 +55,7 @@ DEFAULTS = dict(
     min_support=5, germline_tol=200, max_small_deletion=600, centromere_margin=1_000_000,
     cluster_window=50, foldback_span=FOLDBACK_SPAN, reciprocal_tol=10_000,
     bin=2000, depth_mapq=10, mapp_tol=0.15, trim=2000,
-    read_mapq=20, minseg=200, merge=1000, max_gap=2000, pad=1000,
+    read_mapq=10, merge=1000, max_gap=2000, pad=1000,
     lo=0.75, hi=1.25, step=0.0125, starts=16, prior_sd=0.10, tol=10_000, seed=1,
 )
 
@@ -295,7 +295,7 @@ def _blocks(read, p):
         qa = sum(n for n, o in ops if o in "MI=X")
         rl = sum(n for n, o in ops if o in "MDN=X")
         qs = lc if st == "+" else rcl
-        if mq >= p["read_mapq"] and qa >= p["minseg"]:
+        if mq >= p["read_mapq"]:
             out.append((qs, qs + qa, c, pos, pos + rl, st))
     out.sort()
     merged = []
@@ -335,6 +335,9 @@ def subpaths(locus, windows, bam, p):
                 pieces, cur, prev = [], [], None
                 for b in _blocks(read, p):
                     toks = _tokens(locus, b)
+                    # a short alignment on no segment counts as unaligned read (max_gap below)
+                    if toks is None and b[1] - b[0] <= p["max_gap"]:
+                        continue
                     if toks is None or (prev is not None and b[0] - prev[1] > p["max_gap"]):
                         if cur:
                             pieces.append(cur)
