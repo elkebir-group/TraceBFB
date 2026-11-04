@@ -23,10 +23,13 @@ constraints.
    of tumor/normal x median normal; a shorter one the tumor per-base depth,
    normal-corrected when the normal is within 25% of the median.
 - Subpath constraints: the oriented segments every read of every read set
-   crosses (a read with any alignment in the regions, rebuilt from its SA tag), split where a block lies outside the regions, at an unaligned gap of
-   more than max_gap, and at a step that is neither a reference edge nor a
-   junction. A constraint is written in the reading with more forward segments
-   (ties: the smaller reading as integers).
+   crosses (a read with any alignment in the regions, rebuilt from its SA tag
+   from the alignments of MAPQ at least read_mapq; an alignment of at most
+   max_gap that overlaps no segment counts as unaligned read), split where a
+   block covers no segment, at an unaligned gap of more than max_gap, and at a
+   step that is neither a reference edge nor a junction. A constraint is
+   written in the reading with more forward segments (ties: the smaller
+   reading as integers).
 - Fit: integer copy numbers and multiplicities, balanced, every junction at
    least 1, an even number (at least 2) of free ends at chain ends. Objective:
    depth term + Poisson deviance of the junction reads + a prior on the depth
@@ -55,7 +58,7 @@ DEFAULTS = dict(
     min_support=5, germline_tol=200, max_small_deletion=600, centromere_margin=1_000_000,
     cluster_window=50, foldback_span=FOLDBACK_SPAN, reciprocal_tol=10_000,
     bin=2000, depth_mapq=10, mapp_tol=0.15, trim=2000,
-    read_mapq=20, minseg=200, merge=1000, max_gap=2000, pad=1000,
+    read_mapq=10, merge=1000, max_gap=2000, pad=1000,
     lo=0.75, hi=1.25, step=0.0125, starts=16, prior_sd=0.10, tol=10_000, seed=1,
 )
 
@@ -280,7 +283,7 @@ def _canonical(tokens):
     return min(list(tokens), _rc(tokens), key=key)
 
 
-def _blocks(read, p):
+def _blocks(read, locus, p):
     recs = [(read.reference_name, read.reference_start + 1, "-" if read.is_reverse else "+",
              read.cigarstring, read.mapping_quality)]
     if read.has_tag("SA"):
@@ -295,7 +298,11 @@ def _blocks(read, p):
         qa = sum(n for n, o in ops if o in "MI=X")
         rl = sum(n for n, o in ops if o in "MDN=X")
         qs = lc if st == "+" else rcl
-        if mq >= p["read_mapq"] and qa >= p["minseg"]:
+        # a short alignment that overlaps no segment counts as unaligned read (max_gap in
+        # subpaths), so it neither cuts the string nor keeps the blocks around it apart
+        off = not any(min(pos + rl, s["tel"]) > max(pos, s["cen"])
+                      for s in locus.by_chrom.get(c, []))
+        if mq >= p["read_mapq"] and not (off and qa <= p["max_gap"]):
             out.append((qs, qs + qa, c, pos, pos + rl, st))
     out.sort()
     merged = []
@@ -333,7 +340,7 @@ def subpaths(locus, windows, bam, p):
                     continue
                 seen.add(read.query_name)
                 pieces, cur, prev = [], [], None
-                for b in _blocks(read, p):
+                for b in _blocks(read, locus, p):
                     toks = _tokens(locus, b)
                     if toks is None or (prev is not None and b[0] - prev[1] > p["max_gap"]):
                         if cur:
