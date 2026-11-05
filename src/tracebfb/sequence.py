@@ -1,4 +1,4 @@
-"""Sequence and segment representations used by BFBdist."""
+"""Sequence and segment representations used by TraceBFB."""
 
 import re
 from dataclasses import dataclass

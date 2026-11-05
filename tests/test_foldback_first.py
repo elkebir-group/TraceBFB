@@ -6,11 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bfbdist.distance import BFB_dist
-from bfbdist.foldback_first import foldback_first_BFB_dist
-from bfbdist.history import State
-from bfbdist.history import Operation
-from bfbdist.sequence import Sequence
+from tracebfb.distance import BFB_dist
+from tracebfb.foldback_first import foldback_first_BFB_dist
+from tracebfb.history import State
+from tracebfb.history import Operation
+from tracebfb.sequence import Sequence
 from tests.helpers import CASES, CPP, blocks, line
 
 

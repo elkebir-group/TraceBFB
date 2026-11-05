@@ -1,6 +1,6 @@
 import unittest
 
-from bfbdist.sequence import Segment, Sequence
+from tracebfb.sequence import Segment, Sequence
 from tests.helpers import genomic_sequence, letters
 
 

@@ -1,6 +1,6 @@
 # File formats — DRAFT
 
-`bfbdist` reads and writes three files:
+`tracebfb` reads and writes three files:
 
 | File | Extension | Holds | Needed by |
 |---|---|---|---|
@@ -133,11 +133,11 @@ string	reads	read_set
 
 ---
 
-## Implementation in `bfbdist`
+## Implementation in `tracebfb`
 
-- `bfbdist.graph_file.GraphFile`: `read(path)`, `write(path)`, `validate()` for the graph format.
-- `bfbdist graph` (`bfbdist.graph_construction`) builds a graph from long reads and writes
+- `tracebfb.graph_file.GraphFile`: `read(path)`, `write(path)`, `validate()` for the graph format.
+- `tracebfb graph` (`tracebfb.graph_construction`) builds a graph from long reads and writes
   `graph.tsv` and `subpaths.tsv`.
-- `bfbdist.breakpoint_graph.BreakpointGraph.to_file()` gives the graph of an assembled target.
+- `tracebfb.breakpoint_graph.BreakpointGraph.to_file()` gives the graph of an assembled target.
 - `cpp/lwalk` reads the graph format (and still the older `segments/bonds/starts` format).
 - Not yet: `cpp/nbfb` reading sources in this format.

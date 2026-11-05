@@ -1,6 +1,6 @@
 import unittest
 
-from bfbdist.utils import format_sequence
+from tracebfb.utils import format_sequence
 from tests.helpers import letters
 
 

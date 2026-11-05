@@ -1,4 +1,4 @@
-"""The breakpoint graph of genomic regions from long reads (`bfbdist graph`).
+"""The breakpoint graph of genomic regions from long reads (`tracebfb graph`).
 
 Inputs: the regions (windows), the tumor and normal junction calls (TSV with the
 columns chrA posA sideA chrB posB sideB support; side R when the segment lies to
@@ -50,7 +50,7 @@ from collections import Counter, defaultdict
 
 import pysam
 
-from bfbdist.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
+from tracebfb.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
 
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 

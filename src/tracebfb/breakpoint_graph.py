@@ -15,7 +15,7 @@ and samples the longest walks of a graph written by
 
 from collections import Counter
 
-from bfbdist.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
+from tracebfb.graph_file import FOLDBACK_SPAN, GraphFile, GraphSegment, is_foldback, segment_ids
 
 
 def _is_forward(segment):
@@ -124,7 +124,7 @@ class BreakpointGraph:
         return cls(copy_numbers, junctions, reference, start, end)
 
     def to_file(self, names=None, foldback_span=FOLDBACK_SPAN, header=None):
-        """Return the graph as a :class:`bfbdist.graph_file.GraphFile`.
+        """Return the graph as a :class:`tracebfb.graph_file.GraphFile`.
 
         ``names`` maps a forward segment to its id, by default ``1``, ``2``,
         ... in order of first occurrence. A segment without coordinates (a

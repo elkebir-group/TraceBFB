@@ -1,12 +1,12 @@
 import unittest
 
-from bfbdist.history import (
+from tracebfb.history import (
     Operation,
     State,
     start_state,
     validate_sources,
 )
-from bfbdist.sequence import Sequence
+from tracebfb.sequence import Sequence
 from tests.helpers import letters
 
 
