@@ -1,8 +1,8 @@
 from pathlib import Path
 import math
 
-from bfbdist.bfb_graph import BFBGraph
-from bfbdist.sequence import LetterAsSegment, Segment, Sequence
+from tracebfb.bfb_graph import BFBGraph
+from tracebfb.sequence import LetterAsSegment, Segment, Sequence
 
 
 def letters(text):

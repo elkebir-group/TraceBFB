@@ -2,9 +2,9 @@
 
 import random
 
-from bfbdist.history import Operation, start_state
-from bfbdist.sequence import Segment, Sequence
-from bfbdist.utils import CHROMOSOME_LENGTHS, format_operation_line
+from tracebfb.history import Operation, start_state
+from tracebfb.sequence import Segment, Sequence
+from tracebfb.utils import CHROMOSOME_LENGTHS, format_operation_line
 
 
 def _set_seed(seed):

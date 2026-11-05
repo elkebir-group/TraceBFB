@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bfbdist.breakpoint_graph import BreakpointGraph
-from bfbdist.sequence import Sequence
+from tracebfb.breakpoint_graph import BreakpointGraph
+from tracebfb.sequence import Sequence
 from tests.helpers import CPP, line
 
 # HG008-T chr19 (Z A B C D E F G P, D deleted) and a single fold-back.
@@ -90,7 +90,7 @@ class BreakpointGraphTests(unittest.TestCase):
 
 class FoldbackTests(unittest.TestCase):
     def test_reverse_read_segment_uses_genomic_sides(self):
-        from bfbdist.breakpoint_graph import _foldback
+        from tracebfb.breakpoint_graph import _foldback
         fwd = Sequence.from_string("chr1:100-200[R]")[0]
         rev = Sequence.from_string("chr1:400-300[R]")[0]  # read right to left: start 400 > end 300
         # end of fwd (genomic R, 200) and start of rev (genomic R, 400): a fold-back

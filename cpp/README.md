@@ -119,5 +119,5 @@ walks are the walks that use every edge.
 
 `PREFIX.walks.txt` gets one walk per line as segment names (lower case for a
 reverse traversal) and `PREFIX.targets.txt` the same walks as `;`-joined tokens,
-the target format of `nbfb --targets`. `bfbdist.breakpoint_graph.BreakpointGraph.write_lwalk`
+the target format of `nbfb --targets`. `tracebfb.breakpoint_graph.BreakpointGraph.write_lwalk`
 writes `GRAPH.txt`.

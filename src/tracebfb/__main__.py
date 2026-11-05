@@ -1,4 +1,4 @@
-"""Command-line interface for BFBdist."""
+"""Command-line interface for TraceBFB."""
 
 import argparse
 import sys
@@ -6,7 +6,7 @@ import sys
 
 def handle_simulate(args):
     """Run simulation and write its requested path artifacts."""
-    from bfbdist.simulation import (
+    from tracebfb.simulation import (
         _set_seed,
         simulate_history,
         simulate_sources,
@@ -60,7 +60,7 @@ def read_instance(path):
         ValueError: If the file has fewer than two lines, contains a blank
             line, or contains a malformed sequence.
     """
-    from bfbdist.sequence import Sequence
+    from tracebfb.sequence import Sequence
 
     with open(path, "r", encoding="utf-8") as input_file:
         lines = input_file.read().splitlines()
@@ -74,9 +74,9 @@ def read_instance(path):
     return sequences[:-1], sequences[-1]
 
 
-def handle_bfbdist(args):
+def handle_tracebfb(args):
     """Infer a BFB graph and write graph, DOT, and path artifacts."""
-    from bfbdist.distance import BFB_dist
+    from tracebfb.distance import BFB_dist
 
     try:
         sources, target = read_instance(args.input)
@@ -111,7 +111,7 @@ def handle_graph(args):
     """Build the breakpoint graph of the regions and write graph.tsv (and subpaths.tsv)."""
     import os
 
-    from bfbdist.graph_construction import build_graph
+    from tracebfb.graph_construction import build_graph
 
     reads = []
     for spec in args.reads:
@@ -137,7 +137,7 @@ def handle_graph(args):
 
 def main():
     """Parse command-line arguments and dispatch the selected command."""
-    parser = argparse.ArgumentParser(description="BFBdist command line utility")
+    parser = argparse.ArgumentParser(description="TraceBFB command line utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sim_parser = subparsers.add_parser("simulate")
@@ -156,7 +156,7 @@ def main():
     dist_parser.add_argument("-i", "--input", type=str, required=True)
     dist_parser.add_argument("-o", "--out", type=str, required=True)
     dist_parser.add_argument("--colored", action="store_true")
-    dist_parser.set_defaults(func=handle_bfbdist)
+    dist_parser.set_defaults(func=handle_tracebfb)
 
     graph_parser = subparsers.add_parser(
         "graph", help="breakpoint graph of genomic regions from long reads")

@@ -2,7 +2,7 @@
 //
 //   nbfb -i INSTANCE.txt
 //       One source per line, the target on the last line, in the format of
-//       bfbdist's read_instance. Prints foldback_t (with --foldback-first),
+//       tracebfb's read_instance. Prints foldback_t (with --foldback-first),
 //       t_cycles, types, operations and optimal_histories lines, then the
 //       distance on the last line, as an integer or "inf".
 //

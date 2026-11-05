@@ -3,8 +3,8 @@ cycles may keep the matched prefix."""
 
 import unittest
 
-from bfbdist.distance import BFB_dist, _bounded_search
-from bfbdist.sequence import LetterAsSegment, Sequence
+from tracebfb.distance import BFB_dist, _bounded_search
+from tracebfb.sequence import LetterAsSegment, Sequence
 from tests.helpers import assert_valid_generated_graph, letters
 
 ALGORITHMS = (BFB_dist,)

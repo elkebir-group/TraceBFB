@@ -1,4 +1,4 @@
-"""Graph construction (`bfbdist graph`) without BAMs: junction filters, segments,
+"""Graph construction (`tracebfb graph`) without BAMs: junction filters, segments,
 the fit, and the graph file."""
 
 import tempfile
@@ -6,11 +6,11 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from bfbdist.graph_construction import (
+from tracebfb.graph_construction import (
     DEFAULTS, Locus, _canonical, chrom_key, cut_segments, fit, foldback_flags, read_calls,
     segment_ids, somatic_junctions,
 )
-from bfbdist.graph_file import GraphFile, GraphSegment
+from tracebfb.graph_file import GraphFile, GraphSegment
 
 WINDOW = [("chr4", 1000, 9000)]
 

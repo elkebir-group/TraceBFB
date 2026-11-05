@@ -14,10 +14,10 @@ counterpart.
 import heapq
 import itertools
 
-from bfbdist.distance import _predecessors
-from bfbdist.graph_file import FOLDBACK_SPAN
-from bfbdist.history import State, validate_sources
-from bfbdist.sequence import Sequence
+from tracebfb.distance import _predecessors
+from tracebfb.graph_file import FOLDBACK_SPAN
+from tracebfb.history import State, validate_sources
+from tracebfb.sequence import Sequence
 
 
 def foldback_join(u, v, span=FOLDBACK_SPAN):

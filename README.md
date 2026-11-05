@@ -1,18 +1,18 @@
-# BFBdist
+# TraceBFB
 
-BFBdist simulates breakage-fusion-bridge (BFB) histories over a set of
+TraceBFB simulates breakage-fusion-bridge (BFB) histories over a set of
 source sequences and infers minimum-length histories that produce a target
 sequence.
 
 ## Installation
 
-BFBdist requires Python 3.7 or newer and has no runtime dependencies.
+TraceBFB requires Python 3.7 or newer and has no runtime dependencies.
 
 ```bash
 python -m pip install .
 ```
 
-This installs the `bfbdist` command and the `bfbdist` Python package.
+This installs the `tracebfb` command and the `tracebfb` Python package.
 
 ## Model
 
@@ -54,7 +54,7 @@ the reference orientation and `C` the reverse-complement orientation.
 ### Simulate a history
 
 ```bash
-bfbdist simulate \
+tracebfb simulate \
     --seed 11 \
     --n-sources 2 \
     --n-segments 5 \
@@ -73,7 +73,7 @@ preceding cycle added, which guarantees a nested history.
 The command creates:
 
 - `simulation.input`: the sources followed by the target, one per line,
-  ready for `bfbdist distance`.
+  ready for `tracebfb distance`.
 - `simulation.paths`: the sequence after every cycle, one per line.
 - `simulation.paths.ansi`: the same sequences with ANSI coloring when
   `--colored` is supplied.
@@ -94,7 +94,7 @@ chr1:100-200[R];chr1:200-300[R];chr1:300-200[C];chr2:500-600[R]
 Then run:
 
 ```bash
-bfbdist distance --input sequences.txt --out result --colored
+tracebfb distance --input sequences.txt --out result --colored
 ```
 
 The BFB distance, by backward search from the target (exponential time), is
@@ -121,8 +121,8 @@ the corresponding uncolored path file.
 ## Python API
 
 ```python
-from bfbdist import BFB_dist
-from bfbdist.sequence import Sequence
+from tracebfb import BFB_dist
+from tracebfb.sequence import Sequence
 
 sources = [
     Sequence.from_string("chr1:100-200[R];chr1:200-300[R]"),
@@ -153,7 +153,7 @@ Edges carry an
 Read and validate a saved graph with:
 
 ```python
-from bfbdist import BFBGraph
+from tracebfb import BFBGraph
 
 with open("result.graph", encoding="utf-8") as input_file:
     graph = BFBGraph.from_text(input_file)
@@ -203,10 +203,10 @@ simulated histories and checks that short-deletion histories are nested.
 
 ## Python modules for analyses
 
-- `bfbdist.foldback_first.foldback_first_BFB_dist(sources, target)`: the BFB
+- `tracebfb.foldback_first.foldback_first_BFB_dist(sources, target)`: the BFB
   distance minimum first in fold-back-shaped t-BFB cycles, then in t-BFB
   cycles, then in total cycles, with one optimal history. `cpp/nbfb
   --foldback-first` is the nested counterpart.
-- `bfbdist.breakpoint_graph.BreakpointGraph`: the breakpoint graph of a target
+- `tracebfb.breakpoint_graph.BreakpointGraph`: the breakpoint graph of a target
   over the reference adjacencies of the sources (`from_target`), written in the
   input format of `cpp/lwalk` (`write_lwalk`).

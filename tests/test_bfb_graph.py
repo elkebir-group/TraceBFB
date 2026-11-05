@@ -3,8 +3,8 @@ import math
 import re
 import unittest
 
-from bfbdist.bfb_graph import BFBGraph
-from bfbdist.history import Operation, State, start_state
+from tracebfb.bfb_graph import BFBGraph
+from tracebfb.history import Operation, State, start_state
 from tests.helpers import genomic_sequence
 
 
